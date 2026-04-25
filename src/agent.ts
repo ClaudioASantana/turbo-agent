@@ -67,10 +67,11 @@ export async function runAgentStep(userPrompt: string) {
   globalMessages.push({ role: "user", content: userPrompt });
   saveHistory();
 
+  const MAX_ITERATIONS = 256;
   let loops = 0;
-  while (loops < 15) {
+  while (loops < MAX_ITERATIONS) {
     loops++;
-    
+
     // Sliding Window: Limitar o número de mensagens para evitar estourar o limite de tokens
     const MAX_MESSAGES = 20;
     if (globalMessages.length > MAX_MESSAGES) {
@@ -82,14 +83,15 @@ export async function runAgentStep(userPrompt: string) {
 
     console.log("...pensando...");
     const response = await openai.chat.completions.create({
-      model: "qwen-35b-turboquant",
+      model: process.env.LLM_MODEL || "qwen-35b-turboquant",
       messages: globalMessages,
       temperature: 0.1,
     });
 
+
     const reply = response.choices[0].message.content || "";
     console.log(`\n[LLM Raw Reply]:\n${reply}\n`);
-    
+
     globalMessages.push({ role: "assistant", content: reply });
     saveHistory();
 
@@ -98,7 +100,7 @@ export async function runAgentStep(userPrompt: string) {
     if (toolCall && toolCall.tool) {
       console.log(`\n[Ação Solicitada]: ${toolCall.tool}`);
       console.log(`[Argumentos]: ${JSON.stringify(toolCall.args, null, 2)}`);
-      
+
       if (toolCall.tool === "finish_task") {
         console.log(`\n[RESPOSTA FINAL]:\n${toolCall.args?.finalAnswer || 'Concluído'}\n`);
         return; // End the current task loop
@@ -144,7 +146,7 @@ export async function runAgentStep(userPrompt: string) {
     }
   }
 
-  if (loops >= 15) {
+  if (loops >= MAX_ITERATIONS) {
     console.log("Limite máximo de iterações atingido. Abortando.");
   }
 }

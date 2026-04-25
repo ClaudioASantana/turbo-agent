@@ -1,7 +1,9 @@
 import OpenAI from "openai";
+import "dotenv/config";
 
-// Initialize OpenAI client pointing to local Ollama
+// Initialize OpenAI client using environment variables
 export const openai = new OpenAI({
-  baseURL: "http://localhost:8081/v1",
-  apiKey: "llama.cpp", // API key is required by the SDK but ignored by llama.cpp
+  baseURL: process.env.LLM_BASE_URL || "http://localhost:8081/v1",
+  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "llama.cpp",
 });
+
