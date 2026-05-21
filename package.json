@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@inquirer/prompts": "^8.4.2",
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
     "openai": "^6.34.0",

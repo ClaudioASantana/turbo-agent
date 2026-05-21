@@ -1,9 +1,12 @@
 import OpenAI from "openai";
 import "dotenv/config";
 
-// Initialize OpenAI client using environment variables
-export const openai = new OpenAI({
-  baseURL: process.env.LLM_BASE_URL || "http://localhost:8081/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "llama.cpp",
-});
+export let openai: OpenAI;
+
+export function initLLM(baseURL?: string, apiKey?: string) {
+  openai = new OpenAI({
+    baseURL: baseURL || process.env.LLM_BASE_URL || "http://172.24.160.1:18080/v1",
+    apiKey: apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "llama.cpp",
+  });
+}
 
