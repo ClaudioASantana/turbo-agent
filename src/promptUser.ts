@@ -1,15 +1,10 @@
-import * as readline from "readline";
+import { input, confirm } from "@inquirer/prompts";
+import pc from "picocolors";
 
-export function promptUser(question: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+export async function promptUser(question: string): Promise<string> {
+  return await input({ message: pc.cyan(pc.bold(question)) });
+}
 
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
+export async function confirmAction(message: string, defaultAnswer: boolean = false): Promise<boolean> {
+  return await confirm({ message, default: defaultAnswer });
 }

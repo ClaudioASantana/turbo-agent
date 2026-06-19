@@ -1,0 +1,1099 @@
+diff --git a/src/agent.ts b/src/agent.ts
+index 66ff46f..dc16693 100644
+--- a/src/agent.ts
++++ b/src/agent.ts
+@@ -2,14 +2,14 @@ import * as fs from "fs";
+ import * as path from "path";
+ import { openai } from "./llmClient";
+ import { extractToolCalls } from "./parser";
+-import { availableTools, executeTool } from "./tools";
+-import { promptUser } from "./promptUser";
++import { ToolRegistry } from "./tools";
++import { confirmAction } from "./promptUser";
+ 
+-const SYSTEM_PROMPT = `You are an autonomous AI assistant running locally on Qwen 2.5 Coder.
++const SYSTEM_PROMPT = `You are an autonomous AI assistant.
+ You have access to the following tools:
+-${JSON.stringify(availableTools, null, 2)}
++{TOOL_SCHEMAS}
+ 
+-You MUST think before you act. Use a <thought>...</thought> block to analyze the user's request, plan your approach, or reason about the results of your tools.
++You MUST think before you act. Use a <think>...</think> block to analyze the user's request, plan your approach, or reason about the results of your tools.
+ After your thought block, to use a tool, you MUST respond EXACTLY with a JSON object in this format, and NOTHING ELSE:
+ {
+   "tool": "tool_name",
+@@ -18,135 +18,157 @@ After your thought block, to use a tool, you MUST respond EXACTLY with a JSON ob
+   }
+ }
+ 
+-Do not add conversational text or greetings outside the thought block. Your response must end with the JSON tool call.
++Do not add conversational text or greetings outside the think block. Your response must end with the JSON tool call.
+ You can use multiple tools in sequence. When you are completely finished with the user's request, call the "finish_task" tool with your final answer.
+ `;
+ 
+-// Global message history
+-let globalMessages: any[] = [
+-  { role: "system", content: SYSTEM_PROMPT }
+-];
++export class Agent {
++  private globalMessages: any[] = [];
++  private historyFile: string;
++  private maxIterations: number;
++  private maxMessages: number;
++
++  constructor(historyFilePath: string = ".agent_history.json", maxIterations = 256, maxMessages = 20) {
++    this.historyFile = path.join(process.cwd(), historyFilePath);
++    this.maxIterations = maxIterations;
++    this.maxMessages = maxMessages;
++    this.resetMessages();
++  }
+ 
+-const HISTORY_FILE = path.join(process.cwd(), ".agent_history.json");
++  private getSystemPrompt(): string {
++    const schemas = JSON.stringify(ToolRegistry.getSchemas(), null, 2);
++    return SYSTEM_PROMPT.replace("{TOOL_SCHEMAS}", schemas);
++  }
+ 
+-export function loadHistory() {
+-  if (fs.existsSync(HISTORY_FILE)) {
+-    try {
+-      const data = fs.readFileSync(HISTORY_FILE, "utf-8");
+-      const parsed = JSON.parse(data);
+-      if (Array.isArray(parsed) && parsed.length > 0) {
+-        // Atualiza a primeira mensagem com o SYSTEM_PROMPT atual para garantir que as ferramentas estejam sempre atualizadas
+-        parsed[0] = { role: "system", content: SYSTEM_PROMPT };
+-        globalMessages = parsed;
+-        console.log(`[Memória restaurada: ${globalMessages.length} mensagens no contexto]`);
++  private resetMessages() {
++    this.globalMessages = [
++      { role: "system", content: this.getSystemPrompt() }
++    ];
++  }
++
++  public loadHistory() {
++    if (fs.existsSync(this.historyFile)) {
++      try {
++        const data = fs.readFileSync(this.historyFile, "utf-8");
++        const parsed = JSON.parse(data);
++        if (Array.isArray(parsed) && parsed.length > 0) {
++          parsed[0] = { role: "system", content: this.getSystemPrompt() };
++          this.globalMessages = parsed;
++          console.log(`[Memória restaurada: ${this.globalMessages.length} mensagens no contexto]`);
++        }
++      } catch (e) {
++        console.log("[Erro ao carregar histórico]:", e);
+       }
++    }
++  }
++
++  public saveHistory() {
++    try {
++      fs.writeFileSync(this.historyFile, JSON.stringify(this.globalMessages, null, 2), "utf-8");
+     } catch (e) {
+-      console.log("[Erro ao carregar histórico]:", e);
++      console.log("[Erro ao salvar histórico]:", e);
+     }
+   }
+-}
+ 
+-export function saveHistory() {
+-  try {
+-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(globalMessages, null, 2), "utf-8");
+-  } catch (e) {
+-    console.log("[Erro ao salvar histórico]:", e);
++  public clearHistory() {
++    this.resetMessages();
++    this.saveHistory();
++    console.log("[Memória apagada com sucesso]");
+   }
+-}
+ 
+-export function clearHistory() {
+-  globalMessages = [
+-    { role: "system", content: SYSTEM_PROMPT }
+-  ];
+-  saveHistory();
+-  console.log("[Memória apagada com sucesso]");
+-}
++  public async runStep(userPrompt: string) {
++    this.globalMessages.push({ role: "user", content: userPrompt });
++    this.saveHistory();
+ 
+-export async function runAgentStep(userPrompt: string) {
+-  // Add user prompt to history
+-  globalMessages.push({ role: "user", content: userPrompt });
+-  saveHistory();
+-
+-  const MAX_ITERATIONS = 256;
+-  let loops = 0;
+-  while (loops < MAX_ITERATIONS) {
+-    loops++;
+-
+-    // Sliding Window: Limitar o número de mensagens para evitar estourar o limite de tokens
+-    const MAX_MESSAGES = 20;
+-    if (globalMessages.length > MAX_MESSAGES) {
+-      globalMessages = [
+-        globalMessages[0], // System prompt
+-        ...globalMessages.slice(-(MAX_MESSAGES - 1)) // Últimas mensagens
+-      ];
+-    }
++    let loops = 0;
++    while (loops < this.maxIterations) {
++      loops++;
+ 
+-    console.log("...pensando...");
+-    const response = await openai.chat.completions.create({
+-      model: process.env.LLM_MODEL || "qwen-35b-turboquant",
+-      messages: globalMessages,
+-      temperature: 0.1,
+-    });
++      // Sliding Window
++      if (this.globalMessages.length > this.maxMessages) {
++        this.globalMessages = [
++          this.globalMessages[0], // System prompt
++          ...this.globalMessages.slice(-(this.maxMessages - 1)) // Últimas mensagens
++        ];
++      }
+ 
++      console.log("...pensando...");
++      const response = await openai.chat.completions.create({
++        model: process.env.LLM_MODEL || "qwen-35b-turboquant",
++        messages: this.globalMessages,
++        temperature: 0.1,
++      });
+ 
+-    const reply = response.choices[0].message.content || "";
+-    console.log(`\n[LLM Raw Reply]:\n${reply}\n`);
++      const reply = response.choices[0].message.content || "";
++      console.log(`\n[LLM Raw Reply]:\n${reply}\n`);
+ 
+-    globalMessages.push({ role: "assistant", content: reply });
+-    saveHistory();
++      this.globalMessages.push({ role: "assistant", content: reply });
++      this.saveHistory();
+ 
+-    const toolCall = extractToolCalls(reply);
++      const toolCall = extractToolCalls(reply);
+ 
+-    if (toolCall && toolCall.tool) {
+-      console.log(`\n[Ação Solicitada]: ${toolCall.tool}`);
+-      console.log(`[Argumentos]: ${JSON.stringify(toolCall.args, null, 2)}`);
++      if (toolCall && toolCall.tool) {
++        console.log(`\n[Ação Solicitada]: ${toolCall.tool}`);
++        console.log(`[Argumentos]: ${JSON.stringify(toolCall.args, null, 2)}`);
+ 
+-      if (toolCall.tool === "finish_task") {
+-        console.log(`\n[RESPOSTA FINAL]:\n${toolCall.args?.finalAnswer || 'Concluído'}\n`);
+-        return; // End the current task loop
+-      }
++        if (toolCall.tool === "finish_task") {
++          console.log(`\n[RESPOSTA FINAL]:\n${toolCall.args?.finalAnswer || 'Concluído'}\n`);
++          return;
++        }
+ 
+-      // Human-in-the-Loop check
+-      if (toolCall.tool === "write_file" || toolCall.tool === "run_command" || toolCall.tool === "replace_in_file") {
+-        const answer = await promptUser(`\n⚠️ O Agente quer executar a ferramenta perigosa '${toolCall.tool}'. Aprovar? [y/N]: `);
+-        if (answer.toLowerCase() !== 'y') {
+-          console.log("[Ação Negada]");
+-          globalMessages.push({
+-            role: "user",
+-            content: `Tool '${toolCall.tool}' failed: User denied permission.`
+-          });
+-          saveHistory();
+-          continue; // Go back to LLM so it knows it failed
++        const tool = ToolRegistry.getTool(toolCall.tool);
++        if (!tool) {
++            console.log(`[Erro]: Ferramenta desconhecida: ${toolCall.tool}`);
++            this.globalMessages.push({
++                role: "user",
++                content: `Error: Tool '${toolCall.tool}' does not exist.`
++            });
++            this.saveHistory();
++            continue;
+         }
+-      }
+ 
+-      // Execute tool
+-      console.log(`[Executando...]`);
+-      const toolResult = await executeTool(toolCall.tool, toolCall.args);
+-      console.log(`[Status da Ferramenta]:`, toolResult.success ? "SUCESSO" : "ERRO");
++        // Human-in-the-Loop check
++        if (tool.dangerous) {
++          const approved = await confirmAction(`\n⚠️ O Agente quer executar a ferramenta perigosa '${toolCall.tool}'. Aprovar?`, false);
++          if (!approved) {
++            console.log("[Ação Negada]");
++            this.globalMessages.push({
++              role: "user",
++              content: `Tool '${toolCall.tool}' failed: User denied permission.`
++            });
++            this.saveHistory();
++            continue;
++          }
++        }
+ 
+-      let resultString = JSON.stringify(toolResult);
+-      if (resultString.length > 3000) {
+-        resultString = resultString.substring(0, 3000) + "\n\n... [Saída truncada para economizar tokens. Se precisar do resto, refine a busca ou use paginação.]";
+-      }
++        // Execute tool with validation
++        console.log(`[Executando...]`);
++        const toolResult = await ToolRegistry.execute(toolCall.tool, toolCall.args);
++        console.log(`[Status da Ferramenta]:`, toolResult.success ? "SUCESSO" : "ERRO");
+ 
+-      globalMessages.push({
+-        role: "user",
+-        content: `Tool '${toolCall.tool}' returned:\n${resultString}`
+-      });
+-      saveHistory();
++        let resultString = JSON.stringify(toolResult);
++        if (resultString.length > 3000) {
++          resultString = resultString.substring(0, 3000) + "\n\n... [Saída truncada para economizar tokens. Se precisar do resto, refine a busca ou use paginação.]";
++        }
+ 
+-    } else {
+-      console.log("[Aviso]: Não foi possível extrair a ferramenta. Corrigindo o modelo...");
+-      globalMessages.push({
+-        role: "user",
+-        content: "I could not parse a valid tool call JSON from your response. Please output ONLY the JSON object with 'tool' and 'args' keys."
+-      });
+-      saveHistory();
++        this.globalMessages.push({
++          role: "user",
++          content: `Tool '${toolCall.tool}' returned:\n${resultString}`
++        });
++        this.saveHistory();
++
++      } else {
++        console.log("[Aviso]: Não foi possível extrair a ferramenta. Corrigindo o modelo...");
++        this.globalMessages.push({
++          role: "user",
++          content: "I could not parse a valid tool call JSON from your response. Please output ONLY the JSON object with 'tool' and 'args' keys."
++        });
++        this.saveHistory();
++      }
+     }
+-  }
+ 
+-  if (loops >= MAX_ITERATIONS) {
+-    console.log("Limite máximo de iterações atingido. Abortando.");
++    if (loops >= this.maxIterations) {
++      console.log("Limite máximo de iterações atingido. Abortando.");
++    }
+   }
+ }
+diff --git a/src/index.ts b/src/index.ts
+index c293876..2720d32 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,8 +1,10 @@
+-import { runAgentStep, loadHistory, clearHistory } from "./agent";
++import { Agent } from "./agent";
+ import { promptUser } from "./promptUser";
+ import { initLLM } from "./llmClient";
+ 
+ import { select } from '@inquirer/prompts';
++import { findLocalManifest, loadManifest } from "./mcp/manifest";
++import { MCPClientManager } from "./mcp/client";
+ 
+ async function main() {
+   console.log("=========================================");
+@@ -34,28 +36,45 @@ async function main() {
+   initLLM("http://172.24.160.1:18080/v1", "llama.cpp");
+   console.log(`-> ✅ Selecionado: ${modelOption === 'qwq' ? 'QwQ 32B' : modelOption === 'omniagent' ? 'Qwen 3.6 35B TurboQuant' : 'Qwen 2.5 Coder 14B'} (via OmniAgent)\n`);
+ 
+-  console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file");
++  console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file, etc.");
+   console.log("Comandos de chat iterativo ativados.");
+   console.log("Digite 'exit' ou 'sair' para encerrar. Digite 'clear' ou 'limpar' para resetar a memória.");
+   console.log("=========================================\n");
+ 
+ 
+-  loadHistory();
++  // Initialize MCP Tools
++  const mcpManifestPath = findLocalManifest();
++  const mcpManager = new MCPClientManager();
++  if (mcpManifestPath) {
++    console.log(`[MCP] Manifest found at ${mcpManifestPath}`);
++    const manifest = loadManifest(mcpManifestPath);
++    if (manifest && manifest.mcpServers) {
++      for (const [name, config] of Object.entries(manifest.mcpServers)) {
++        await mcpManager.startServer(name, config);
++      }
++    }
++  } else {
++    console.log("[MCP] No manifest found.");
++  }
++
++  const agent = new Agent();
++  agent.loadHistory();
+ 
+   while (true) {
+-    const prompt = await promptUser("\nVocê: ");
++    const prompt = await promptUser("Você: ");
+     
+     if (prompt.trim() === "") continue;
+     if (prompt.toLowerCase() === "exit" || prompt.toLowerCase() === "sair") {
+       console.log("Encerrando agente...");
++      await mcpManager.closeAll();
+       break;
+     }
+     if (prompt.toLowerCase() === "clear" || prompt.toLowerCase() === "limpar") {
+-      clearHistory();
++      agent.clearHistory();
+       continue;
+     }
+ 
+-    await runAgentStep(prompt);
++    await agent.runStep(prompt);
+   }
+ }
+ 
+diff --git a/src/promptUser.ts b/src/promptUser.ts
+index 7d64903..245f4de 100644
+--- a/src/promptUser.ts
++++ b/src/promptUser.ts
+@@ -1,15 +1,9 @@
+-import * as readline from "readline";
++import { input, confirm } from "@inquirer/prompts";
+ 
+-export function promptUser(question: string): Promise<string> {
+-  const rl = readline.createInterface({
+-    input: process.stdin,
+-    output: process.stdout,
+-  });
++export async function promptUser(question: string): Promise<string> {
++  return await input({ message: question });
++}
+ 
+-  return new Promise((resolve) => {
+-    rl.question(question, (answer) => {
+-      rl.close();
+-      resolve(answer);
+-    });
+-  });
++export async function confirmAction(message: string, defaultAnswer: boolean = false): Promise<boolean> {
++  return await confirm({ message, default: defaultAnswer });
+ }
+diff --git a/src/tools.ts b/src/tools.ts
+index 270b7a3..966c912 100644
+--- a/src/tools.ts
++++ b/src/tools.ts
+@@ -3,6 +3,7 @@ import * as path from "path";
+ import { exec, spawn, ChildProcess } from "child_process";
+ import { promisify } from "util";
+ import * as cheerio from "cheerio";
++import { z } from "zod";
+ 
+ const execPromise = promisify(exec);
+ 
+@@ -15,7 +16,6 @@ function resolveFilePath(targetPath: string, rootDir: string = "."): string {
+     return absolutePath;
+   }
+   
+-  // If it doesn't exist, search for it by filename
+   const fileName = path.basename(targetPath);
+   let foundPath: string | null = null;
+   
+@@ -74,186 +74,10 @@ function searchFilesHelper(dir: string, pattern: string, isCaseSensitive: boolea
+   return results;
+ }
+ 
+-export interface ToolDef {
+-  name: string;
+-  description: string;
+-  parameters: object;
+-}
+-
+-export const availableTools: ToolDef[] = [
+-  {
+-    name: "read_file",
+-    description: "Reads the content of a file",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "Absolute or relative path to the file" },
+-      },
+-      required: ["filePath"],
+-    },
+-  },
+-  {
+-    name: "list_files",
+-    description: "Lists files in a directory",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        dirPath: { type: "string", description: "Directory path to list" },
+-      },
+-      required: ["dirPath"],
+-    },
+-  },
+-  {
+-    name: "write_file",
+-    description: "Writes content to a file (creates or overwrites it)",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "Absolute or relative path to the file" },
+-        content: { type: "string", description: "The content to write" },
+-      },
+-      required: ["filePath", "content"],
+-    },
+-  },
+-  {
+-    name: "run_command",
+-    description: "Executes a command in the terminal",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        command: { type: "string", description: "The terminal command to execute" },
+-        cwd: { type: "string", description: "Optional current working directory for the command" },
+-      },
+-      required: ["command"],
+-    },
+-  },
+-  {
+-    name: "replace_in_file",
+-    description: "Replaces all exact occurrences of a string in a file.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "Absolute or relative path to the file" },
+-        searchValue: { type: "string", description: "The exact string to find and replace" },
+-        replaceValue: { type: "string", description: "The new string to insert" }
+-      },
+-      required: ["filePath", "searchValue", "replaceValue"]
+-    }
+-  },
+-  {
+-    name: "search_files",
+-    description: "Searches for a string across files in a directory, ignoring node_modules and .git. Returns a list of matches with ABSOLUTE paths and line numbers. IMPORTANT: Always use the exact absolute path returned by this tool when using other tools like read_file or patch_file.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        dirPath: { type: "string", description: "The directory to search in" },
+-        pattern: { type: "string", description: "The string to search for" },
+-        isCaseSensitive: { type: "boolean", description: "Whether the search should be case sensitive. Defaults to false." }
+-      },
+-      required: ["dirPath", "pattern"]
+-    }
+-  },
+-  {
+-    name: "finish_task",
+-    description: "Call this when the task is fully completed to report the final answer to the user.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        finalAnswer: { type: "string", description: "The final answer or summary of what was done" },
+-      },
+-      required: ["finalAnswer"],
+-    },
+-  },
+-  {
+-    name: "web_search",
+-    description: "Searches the web using DuckDuckGo and returns a list of URLs and snippets",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        query: { type: "string", description: "The search query" },
+-      },
+-      required: ["query"]
+-    }
+-  },
+-  {
+-    name: "fetch_url",
+-    description: "Fetches a URL and extracts clean text from the HTML, removing scripts and styles",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        url: { type: "string", description: "The URL to fetch" },
+-      },
+-      required: ["url"]
+-    }
+-  },
+-  {
+-    name: "start_background_command",
+-    description: "Starts a background command (e.g. npm run dev). Returns immediately with a process ID.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        command: { type: "string", description: "The terminal command to execute" },
+-        id: { type: "string", description: "A unique ID for this process (e.g., 'dev-server')" },
+-        cwd: { type: "string", description: "Optional working directory" }
+-      },
+-      required: ["command", "id"]
+-    }
+-  },
+-  {
+-    name: "read_process_logs",
+-    description: "Reads the recent logs (stdout/stderr) of a background process.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        id: { type: "string", description: "The ID of the process" },
+-        lines: { type: "number", description: "Number of recent lines to read. Defaults to 100." }
+-      },
+-      required: ["id"]
+-    }
+-  },
+-  {
+-    name: "stop_background_process",
+-    description: "Stops a running background process.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        id: { type: "string", description: "The ID of the process" }
+-      },
+-      required: ["id"]
+-    }
+-  },
+-  {
+-    name: "patch_file",
+-    description: "Replaces a specific range of lines in a file with new content. Useful for large refactors where replace_in_file is insufficient.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "EXACT ABSOLUTE path to the file" },
+-        startLine: { type: "number", description: "The 1-indexed starting line number to replace (inclusive)" },
+-        endLine: { type: "number", description: "The 1-indexed ending line number to replace (inclusive)" },
+-        content: { type: "string", description: "The new content to insert in place of the specified lines" }
+-      },
+-      required: ["filePath", "startLine", "endLine", "content"]
+-    }
+-  },
+-  {
+-    name: "analyze_codebase",
+-    description: "Semantically analyzes a file or directory to extract only the structure (functions, classes, interfaces, exports). Use this to explore a codebase quickly without wasting context window on full file contents.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        path: { type: "string", description: "Absolute path to the file or directory to analyze" }
+-      },
+-      required: ["path"]
+-    }
+-  }
+-];
+-
+ function extractSignatures(content: string, filename: string): string[] {
+   const signatures: string[] = [];
+   const lines = content.split('\n');
+   
+-  // Basic semantic regexes for TS/JS
+   const regexes = [
+     /^(?:export\s+)?(?:default\s+)?class\s+\w+/i,
+     /^(?:export\s+)?interface\s+\w+/i,
+@@ -275,230 +99,298 @@ function extractSignatures(content: string, filename: string): string[] {
+   return signatures;
+ }
+ 
+-export async function executeTool(toolName: string, args: any): Promise<any> {
+-  switch (toolName) {
+-    case "read_file":
+-      try {
+-        const filePath = resolveFilePath(args.filePath);
+-        if (!fs.existsSync(filePath)) {
+-          return { success: false, error: `File not found: ${args.filePath}` };
+-        }
+-        const content = fs.readFileSync(filePath, "utf-8");
+-        return { success: true, content };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "list_files":
+-      try {
+-        const files = fs.readdirSync(path.resolve(args.dirPath));
+-        return { success: true, files };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "write_file":
+-      try {
+-        const filePath = path.resolve(args.filePath); // Write always uses exact path
+-        fs.writeFileSync(filePath, args.content, "utf-8");
+-        return { success: true, message: `File ${args.filePath} written successfully.` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "replace_in_file":
+-      try {
+-        const filePath = resolveFilePath(args.filePath);
+-        if (!fs.existsSync(filePath)) {
+-          return { success: false, error: `File not found: ${args.filePath}` };
+-        }
+-        let content = fs.readFileSync(filePath, "utf-8");
+-        if (!content.includes(args.searchValue)) {
+-           return { success: false, error: "The searchValue was not found in the file." };
+-        }
+-        content = content.split(args.searchValue).join(args.replaceValue);
+-        fs.writeFileSync(filePath, content, "utf-8");
+-        return { success: true, message: `Replaced all occurrences in ${args.filePath}` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "patch_file":
+-      try {
+-        const filePath = resolveFilePath(args.filePath);
+-        if (!fs.existsSync(filePath)) {
+-          return { success: false, error: `File not found: ${args.filePath}` };
+-        }
+-        let content = fs.readFileSync(filePath, "utf-8");
+-        const lines = content.split('\n');
+-        const startIdx = args.startLine - 1;
+-        const endIdx = args.endLine - 1;
+-        
+-        if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) {
+-            return { success: false, error: `Invalid line range. File has ${lines.length} lines.` };
+-        }
++import { zodToJsonSchema } from "zod-to-json-schema";
+ 
+-        const newLines = args.content.split('\n');
+-        lines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
+-        
+-        fs.writeFileSync(filePath, lines.join('\n'), "utf-8");
+-        return { success: true, message: `Patched lines ${args.startLine} to ${args.endLine} in ${args.filePath}` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
++export interface ToolDef<T extends z.ZodTypeAny> {
++  name: string;
++  description: string;
++  schema: T;
++  dangerous?: boolean;
++  execute: (args: z.infer<T>) => Promise<any> | any;
++}
++
++class Registry {
++  private tools: Map<string, ToolDef<any>> = new Map();
++
++  register<T extends z.ZodTypeAny>(tool: ToolDef<T>) {
++    this.tools.set(tool.name, tool);
++  }
++
++  getTool(name: string): ToolDef<any> | undefined {
++    return this.tools.get(name);
++  }
++
++  getSchemas() {
++    return Array.from(this.tools.values()).map(tool => ({
++      name: tool.name,
++      description: tool.description,
++      parameters: (tool as any)._mcpJsonSchema || zodToJsonSchema(tool.schema)
++    }));
++  }
++
++  async execute(name: string, args: any): Promise<any> {
++    const tool = this.tools.get(name);
++    if (!tool) {
++      return { success: false, error: `Tool ${name} not found.` };
++    }
++
++    try {
++      const parsedArgs = tool.schema.parse(args);
++      return await tool.execute(parsedArgs);
++    } catch (e: any) {
++      if (e instanceof z.ZodError) {
++        return { success: false, error: "Validation Error: " + (e as any).errors.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ') };
+       }
+-    case "analyze_codebase":
+-      try {
+-        const targetPath = resolveFilePath(args.path);
+-        if (!fs.existsSync(targetPath)) {
+-          return { success: false, error: `Path not found: ${args.path}` };
+-        }
+-        
+-        let results: string[] = [];
+-        const stat = fs.statSync(targetPath);
+-        
+-        if (stat.isDirectory()) {
+-          const files = searchFilesHelper(targetPath, ""); // Quick way to get all files
+-          // Extract signatures from each file
+-          const uniqueFiles = [...new Set(files.map(f => f.split(':')[0]))];
+-          
+-          for (const file of uniqueFiles) {
+-            if (file.endsWith('.ts') || file.endsWith('.js') || file.endsWith('.jsx') || file.endsWith('.tsx')) {
+-               const content = fs.readFileSync(file, "utf-8");
+-               const sigs = extractSignatures(content, file);
+-               if (sigs.length > 0) {
+-                 results.push(`\n--- ${file} ---`);
+-                 results.push(...sigs);
+-               }
+-            }
++      return { success: false, error: e.message || String(e) };
++    }
++  }
++}
++
++export const ToolRegistry = new Registry();
++
++// Registry setup
++ToolRegistry.register({
++  name: "read_file",
++  description: "Reads the content of a file",
++  schema: z.object({ filePath: z.string().describe("Absolute or relative path to the file") }),
++  execute: (args) => {
++    const filePath = resolveFilePath(args.filePath);
++    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
++    return { success: true, content: fs.readFileSync(filePath, "utf-8") };
++  }
++});
++
++ToolRegistry.register({
++  name: "list_files",
++  description: "Lists files in a directory",
++  schema: z.object({ dirPath: z.string().describe("Directory path to list") }),
++  execute: (args) => {
++    return { success: true, files: fs.readdirSync(path.resolve(args.dirPath)) };
++  }
++});
++
++ToolRegistry.register({
++  name: "write_file",
++  description: "Writes content to a file (creates or overwrites it)",
++  dangerous: true,
++  schema: z.object({ 
++    filePath: z.string().describe("Absolute or relative path to the file"),
++    content: z.string().describe("The content to write")
++  }),
++  execute: (args) => {
++    const filePath = path.resolve(args.filePath);
++    fs.writeFileSync(filePath, args.content, "utf-8");
++    return { success: true, message: `File ${args.filePath} written successfully.` };
++  }
++});
++
++ToolRegistry.register({
++  name: "run_command",
++  description: "Executes a command in the terminal",
++  dangerous: true,
++  schema: z.object({
++    command: z.string().describe("The terminal command to execute"),
++    cwd: z.string().optional().describe("Optional current working directory")
++  }),
++  execute: async (args) => {
++    const options = args.cwd ? { cwd: path.resolve(args.cwd) } : {};
++    try {
++      const { stdout, stderr } = await execPromise(args.command, options);
++      return { success: true, stdout, stderr };
++    } catch (e: any) {
++      return { success: false, error: e.message, stdout: e.stdout, stderr: e.stderr };
++    }
++  }
++});
++
++ToolRegistry.register({
++  name: "replace_in_file",
++  description: "Replaces all exact occurrences of a string in a file.",
++  dangerous: true,
++  schema: z.object({
++    filePath: z.string(),
++    searchValue: z.string(),
++    replaceValue: z.string()
++  }),
++  execute: (args) => {
++    const filePath = resolveFilePath(args.filePath);
++    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
++    let content = fs.readFileSync(filePath, "utf-8");
++    if (!content.includes(args.searchValue)) throw new Error("The searchValue was not found in the file.");
++    content = content.split(args.searchValue).join(args.replaceValue);
++    fs.writeFileSync(filePath, content, "utf-8");
++    return { success: true, message: `Replaced all occurrences in ${args.filePath}` };
++  }
++});
++
++ToolRegistry.register({
++  name: "search_files",
++  description: "Searches for a string across files in a directory, ignoring node_modules and .git. Returns absolute paths.",
++  schema: z.object({
++    dirPath: z.string(),
++    pattern: z.string(),
++    isCaseSensitive: z.boolean().optional().default(false)
++  }),
++  execute: (args) => {
++    const dir = path.resolve(args.dirPath);
++    if (!fs.existsSync(dir)) throw new Error(`Directory not found: ${args.dirPath}`);
++    return { success: true, results: searchFilesHelper(dir, args.pattern, args.isCaseSensitive) };
++  }
++});
++
++ToolRegistry.register({
++  name: "patch_file",
++  description: "Replaces a specific range of lines in a file with new content. Useful for large refactors.",
++  dangerous: true,
++  schema: z.object({
++    filePath: z.string().describe("EXACT ABSOLUTE path to the file"),
++    startLine: z.number().describe("The 1-indexed starting line number (inclusive)"),
++    endLine: z.number().describe("The 1-indexed ending line number (inclusive)"),
++    content: z.string().describe("The new content to insert")
++  }),
++  execute: (args) => {
++    const filePath = resolveFilePath(args.filePath);
++    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
++    let content = fs.readFileSync(filePath, "utf-8");
++    const lines = content.split('\n');
++    const startIdx = args.startLine - 1;
++    const endIdx = args.endLine - 1;
++    if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) {
++      throw new Error(`Invalid line range. File has ${lines.length} lines.`);
++    }
++    const newLines = args.content.split('\n');
++    lines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
++    fs.writeFileSync(filePath, lines.join('\n'), "utf-8");
++    return { success: true, message: `Patched lines ${args.startLine} to ${args.endLine} in ${args.filePath}` };
++  }
++});
++
++ToolRegistry.register({
++  name: "analyze_codebase",
++  description: "Semantically analyzes a file or directory to extract only the structure.",
++  schema: z.object({ path: z.string() }),
++  execute: (args) => {
++    const targetPath = resolveFilePath(args.path);
++    if (!fs.existsSync(targetPath)) throw new Error(`Path not found: ${args.path}`);
++    let results: string[] = [];
++    const stat = fs.statSync(targetPath);
++    if (stat.isDirectory()) {
++      const files = searchFilesHelper(targetPath, "");
++      const uniqueFiles = [...new Set(files.map(f => f.split(':')[0]))];
++      for (const file of uniqueFiles) {
++        if (file.match(/\.(ts|js|jsx|tsx)$/)) {
++          const content = fs.readFileSync(file, "utf-8");
++          const sigs = extractSignatures(content, file);
++          if (sigs.length > 0) {
++            results.push(`\n--- ${file} ---`, ...sigs);
+           }
+-        } else {
+-          const content = fs.readFileSync(targetPath, "utf-8");
+-          results = extractSignatures(content, targetPath);
+-        }
+-        
+-        if (results.length === 0) return { success: true, analysis: "No structures found." };
+-        return { success: true, analysis: results.join('\n') };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "run_command":
+-      try {
+-        const options = args.cwd ? { cwd: path.resolve(args.cwd) } : {};
+-        const { stdout, stderr } = await execPromise(args.command, options);
+-        return { success: true, stdout, stderr };
+-      } catch (e: any) {
+-        return { success: false, error: e.message, stdout: e.stdout, stderr: e.stderr };
+-      }
+-    case "search_files":
+-      try {
+-        const dir = path.resolve(args.dirPath);
+-        if (!fs.existsSync(dir)) {
+-          return { success: false, error: `Directory not found: ${args.dirPath}` };
+         }
+-        const isCaseSensitive = args.isCaseSensitive || false;
+-        const results = searchFilesHelper(dir, args.pattern, isCaseSensitive);
+-        return { success: true, results };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+       }
+-    case "web_search":
+-      try {
+-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`);
+-        const html = await response.text();
+-        const $ = cheerio.load(html);
+-        const searchResults: any[] = [];
+-        $('.result').each((i, el) => {
+-          if (i >= 5) return; // limit to 5 results
+-          const title = $(el).find('.result__title').text().trim();
+-          const snippet = $(el).find('.result__snippet').text().trim();
+-          const rawUrl = $(el).find('.result__url').attr('href') || "";
+-          
+-          let cleanUrl = rawUrl;
+-          if (cleanUrl.startsWith('//duckduckgo.com/l/?uddg=')) {
+-              cleanUrl = decodeURIComponent(cleanUrl.split('uddg=')[1].split('&')[0]);
+-          } else if (cleanUrl.startsWith('/url?q=')) {
+-              cleanUrl = decodeURIComponent(cleanUrl.split('/url?q=')[1].split('&')[0]);
+-          }
++    } else {
++      results = extractSignatures(fs.readFileSync(targetPath, "utf-8"), targetPath);
++    }
++    return { success: true, analysis: results.length === 0 ? "No structures found." : results.join('\n') };
++  }
++});
+ 
+-          if (title && cleanUrl) {
+-            searchResults.push({ title, snippet, url: cleanUrl });
+-          }
+-        });
+-        return { success: true, results: searchResults };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
++ToolRegistry.register({
++  name: "web_search",
++  description: "Searches the web using DuckDuckGo",
++  schema: z.object({ query: z.string() }),
++  execute: async (args) => {
++    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`);
++    const html = await response.text();
++    const $ = cheerio.load(html);
++    const searchResults: any[] = [];
++    $('.result').each((i, el) => {
++      if (i >= 5) return;
++      const title = $(el).find('.result__title').text().trim();
++      const snippet = $(el).find('.result__snippet').text().trim();
++      const rawUrl = $(el).find('.result__url').attr('href') || "";
++      let cleanUrl = rawUrl;
++      if (cleanUrl.startsWith('//duckduckgo.com/l/?uddg=')) {
++        cleanUrl = decodeURIComponent(cleanUrl.split('uddg=')[1].split('&')[0]);
++      } else if (cleanUrl.startsWith('/url?q=')) {
++        cleanUrl = decodeURIComponent(cleanUrl.split('/url?q=')[1].split('&')[0]);
+       }
+-    case "fetch_url":
+-      try {
+-        const response = await fetch(args.url);
+-        const html = await response.text();
+-        const $ = cheerio.load(html);
+-        
+-        // Remove useless tags
+-        $('script, style, noscript, svg, img, video, audio, iframe, nav, footer, header').remove();
+-        
+-        // Extract text and clean up whitespace
+-        const text = $('body').text().replace(/\s+/g, ' ').trim();
+-        return { success: true, text: text.substring(0, 8000) }; // limit to 8k chars to avoid token limits
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "start_background_command":
+-      try {
+-        if (backgroundProcesses[args.id]) {
+-          return { success: false, error: `A process with id '${args.id}' is already running.` };
+-        }
+-        const options = args.cwd ? { cwd: path.resolve(args.cwd), shell: true } : { shell: true };
+-        const child = spawn(args.command, [], options);
+-        
+-        backgroundProcesses[args.id] = { process: child, logs: [] };
+-        
+-        const handleOutput = (data: any) => {
+-           const lines = data.toString().split('\n');
+-           const proc = backgroundProcesses[args.id];
+-           if (proc) {
+-             proc.logs.push(...lines);
+-             if (proc.logs.length > 500) {
+-               proc.logs = proc.logs.slice(proc.logs.length - 500);
+-             }
+-           }
+-        };
++      if (title && cleanUrl) searchResults.push({ title, snippet, url: cleanUrl });
++    });
++    return { success: true, results: searchResults };
++  }
++});
+ 
+-        child.stdout?.on('data', handleOutput);
+-        child.stderr?.on('data', handleOutput);
+-        
+-        child.on('close', (code) => {
+-           const proc = backgroundProcesses[args.id];
+-           if (proc) proc.logs.push(`[Process exited with code ${code}]`);
+-        });
++ToolRegistry.register({
++  name: "fetch_url",
++  description: "Fetches a URL and extracts clean text",
++  schema: z.object({ url: z.string() }),
++  execute: async (args) => {
++    const response = await fetch(args.url);
++    const html = await response.text();
++    const $ = cheerio.load(html);
++    $('script, style, noscript, svg, img, video, audio, iframe, nav, footer, header').remove();
++    const text = $('body').text().replace(/\s+/g, ' ').trim();
++    return { success: true, text: text.substring(0, 8000) };
++  }
++});
+ 
+-        return { success: true, message: `Process '${args.id}' started successfully.` };
+-      } catch (e: any) {
+-         return { success: false, error: e.message };
+-      }
+-    case "read_process_logs":
+-      try {
+-        const proc = backgroundProcesses[args.id];
+-        if (!proc) {
+-           return { success: false, error: `No running process found with id '${args.id}'.` };
+-        }
+-        const linesToRead = args.lines || 100;
+-        const logsToReturn = proc.logs.slice(-Math.abs(linesToRead));
+-        return { success: true, logs: logsToReturn.join('\n') };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "stop_background_process":
+-      try {
+-        const proc = backgroundProcesses[args.id];
+-        if (!proc) {
+-           return { success: false, error: `No running process found with id '${args.id}'.` };
+-        }
+-        proc.process.kill();
+-        delete backgroundProcesses[args.id];
+-        return { success: true, message: `Process '${args.id}' stopped and removed.` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
++ToolRegistry.register({
++  name: "start_background_command",
++  description: "Starts a background command. Returns immediately.",
++  schema: z.object({
++    command: z.string(),
++    id: z.string(),
++    cwd: z.string().optional()
++  }),
++  execute: (args) => {
++    if (backgroundProcesses[args.id]) throw new Error(`Process '${args.id}' is already running.`);
++    const options = args.cwd ? { cwd: path.resolve(args.cwd), shell: true } : { shell: true };
++    const child = spawn(args.command, [], options);
++    backgroundProcesses[args.id] = { process: child, logs: [] };
++    const handleOutput = (data: any) => {
++      const proc = backgroundProcesses[args.id];
++      if (proc) {
++        proc.logs.push(...data.toString().split('\n'));
++        if (proc.logs.length > 500) proc.logs = proc.logs.slice(-500);
+       }
+-    case "finish_task":
+-        return { success: true, message: "Task marked as completed." };
+-    default:
+-      return { success: false, error: `Tool ${toolName} not found.` };
++    };
++    child.stdout?.on('data', handleOutput);
++    child.stderr?.on('data', handleOutput);
++    child.on('close', (code) => {
++      if (backgroundProcesses[args.id]) backgroundProcesses[args.id].logs.push(`[Process exited with code ${code}]`);
++    });
++    return { success: true, message: `Process '${args.id}' started successfully.` };
+   }
+-}
++});
++
++ToolRegistry.register({
++  name: "read_process_logs",
++  description: "Reads the recent logs of a background process.",
++  schema: z.object({ id: z.string(), lines: z.number().optional().default(100) }),
++  execute: (args) => {
++    const proc = backgroundProcesses[args.id];
++    if (!proc) throw new Error(`No running process found with id '${args.id}'.`);
++    return { success: true, logs: proc.logs.slice(-Math.abs(args.lines)).join('\n') };
++  }
++});
++
++ToolRegistry.register({
++  name: "stop_background_process",
++  description: "Stops a running background process.",
++  schema: z.object({ id: z.string() }),
++  execute: (args) => {
++    const proc = backgroundProcesses[args.id];
++    if (!proc) throw new Error(`No running process found with id '${args.id}'.`);
++    proc.process.kill();
++    delete backgroundProcesses[args.id];
++    return { success: true, message: `Process '${args.id}' stopped.` };
++  }
++});
++
++ToolRegistry.register({
++  name: "finish_task",
++  description: "Call this when the task is fully completed.",
++  schema: z.object({ finalAnswer: z.string() }),
++  execute: () => {
++    return { success: true, message: "Task marked as completed." };
++  }
++});
