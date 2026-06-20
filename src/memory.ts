@@ -1,12 +1,15 @@
 import { openai } from "./llmClient";
 
 const SUMMARIZER_PROMPT = `Você é um compactador de memória de IA. 
-Sua tarefa é ler um histórico longo de interações entre um Usuário e um Agente de IA e criar um resumo altamente condensado e factual.
-Regras:
-1. Preserve nomes de arquivos, caminhos de pastas, comandos usados e decisões tomadas.
-2. Ignore cumprimentos, saudações ou jargões ("Olá", "Vou fazer", etc).
-3. Seja direto e objetivo, como um diário de bordo.
-4. Responda APENAS com o texto do resumo. Não use tags XML na sua saída final.`;
+Sua tarefa é ler um histórico longo de interações entre um Usuário e um Agente de IA e extrair metadados.
+Responda EXCLUSIVAMENTE com um objeto JSON neste formato:
+{
+  "resumo_geral": "Parágrafo curto descrevendo o progresso alcançado",
+  "arquivos_modificados": ["caminho/arquivo1", "caminho/arquivo2"],
+  "comandos_executados": ["npm install", "tsc"],
+  "decisoes_tecnicas": ["Extraiu função X por motivo Y"]
+}
+Não insira blocos de código markdown ou texto solto. Apenas o JSON puro.`;
 
 export async function summarizeMessages(messages: any[]): Promise<string> {
   // Converte as mensagens para um texto legível para o compactador (filtrando imagens Base64)
@@ -30,9 +33,30 @@ export async function summarizeMessages(messages: any[]): Promise<string> {
         { role: "user", content: `Resuma o seguinte histórico:\n\n${conversationText}` }
       ],
       temperature: 0.1,
+      response_format: { type: "json_object" },
     });
 
-    return response.choices[0].message.content || "Resumo indisponível.";
+    const rawContent = response.choices[0].message.content || "{}";
+    
+    try {
+        const parsed = JSON.parse(rawContent);
+        let markdown = `**Contexto Consolidado:**\n${parsed.resumo_geral || "Sem resumo."}\n\n`;
+        
+        if (parsed.arquivos_modificados && parsed.arquivos_modificados.length > 0) {
+            markdown += `**📁 Arquivos Afetados:**\n` + parsed.arquivos_modificados.map((f: string) => `- \`${f}\``).join("\n") + "\n\n";
+        }
+        if (parsed.comandos_executados && parsed.comandos_executados.length > 0) {
+            markdown += `**💻 Comandos Executados:**\n` + parsed.comandos_executados.map((c: string) => `- \`${c}\``).join("\n") + "\n\n";
+        }
+        if (parsed.decisoes_tecnicas && parsed.decisoes_tecnicas.length > 0) {
+            markdown += `**🧠 Decisões e Conhecimento:**\n` + parsed.decisoes_tecnicas.map((d: string) => `- ${d}`).join("\n") + "\n\n";
+        }
+        
+        return markdown.trim();
+    } catch (parseError) {
+        // Fallback gracefully se o modelo vomitar texto em vez de JSON
+        return rawContent;
+    }
   } catch (error: any) {
     throw new Error(`Falha ao compactar memória: ${error.message}`);
   }

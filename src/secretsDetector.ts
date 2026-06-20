@@ -179,6 +179,22 @@ export function formatSecretsWarning(matches: SecretMatch[]): string {
 }
 
 /**
+ * Scans the given text and replaces all matched secrets with a redacted version.
+ */
+export function redactSecretsInText(content: string): string {
+  if (!content || typeof content !== 'string') return content;
+  let redactedContent = content;
+
+  for (const pattern of SECRET_PATTERNS) {
+    redactedContent = redactedContent.replace(pattern.regex, (match) => {
+      return redact(match);
+    });
+  }
+
+  return redactedContent;
+}
+
+/**
  * Partially redacts a secret string for safe display.
  * Shows first 4 and last 4 characters, masks the rest.
  */

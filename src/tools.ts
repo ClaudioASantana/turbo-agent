@@ -7,6 +7,7 @@ import { z } from "zod";
 import { AgentTerminal } from "./terminal";
 import { confirmAction } from "./promptUser";
 import pc from "picocolors";
+import { Logger } from "./logger";
 const execPromise = promisify(exec);
 
 export const backgroundProcesses: Record<string, { process: ChildProcess, logs: string[] }> = {};
@@ -103,6 +104,21 @@ function extractSignatures(content: string, filename: string): string[] {
 
 import { zodToJsonSchema } from "zod-to-json-schema";
 
+export enum ErrorCategory {
+  PARSING = 'PARSING',
+  VALIDATION = 'VALIDATION',
+  EXECUTION = 'EXECUTION',
+  PERMISSION = 'PERMISSION',
+  SYSTEM = 'SYSTEM'
+}
+
+export interface ToolResult {
+  success: boolean;
+  category?: ErrorCategory;
+  error?: string;
+  [key: string]: any;
+}
+
 export interface ToolDef<T extends z.ZodTypeAny> {
   name: string;
   description: string;
@@ -130,20 +146,28 @@ class Registry {
     }));
   }
 
-  async execute(name: string, args: any): Promise<any> {
+  async execute(name: string, args: any): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
-      return { success: false, error: `Tool ${name} not found.` };
+      Logger.debug(`Tool not found: ${name}`);
+      return { success: false, category: ErrorCategory.VALIDATION, error: `Tool ${name} not found.` };
     }
 
+    const startTime = Date.now();
     try {
+      Logger.debug(`Executing tool: ${name}`, { args });
       const parsedArgs = tool.schema.parse(args);
-      return await tool.execute(parsedArgs);
+      const result = await tool.execute(parsedArgs);
+      const durationMs = Date.now() - startTime;
+      Logger.debug(`Tool executed successfully: ${name}`, { durationMs });
+      return { ...result, durationMs };
     } catch (e: any) {
+      const durationMs = Date.now() - startTime;
+      Logger.debug(`Tool execution failed: ${name}`, { error: e.message, durationMs });
       if (e instanceof z.ZodError) {
-        return { success: false, error: "Validation Error: " + e.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ') };
+        return { success: false, category: ErrorCategory.VALIDATION, durationMs, error: "Validation Error: " + e.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ') };
       }
-      return { success: false, error: e.message || String(e) };
+      return { success: false, category: ErrorCategory.EXECUTION, durationMs, error: e.message || String(e) };
     }
   }
 }
@@ -173,7 +197,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "write_file",
-  description: "Writes content to a file (creates or overwrites it)",
+  description: "DANGER: OVERWRITES ENTIRE FILE. Writes content to a file (creates it if it doesn't exist). Use this ONLY for completely new files or when you intend to erase all previous content. For minor edits, use 'patch_file' or 'multi_replace_in_file'.",
   dangerous: true,
   schema: z.object({ 
     filePath: z.string().describe("Absolute or relative path to the file"),
@@ -188,7 +212,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "run_command",
-  description: "Executes a command in the persistent terminal. State (like cwd, env vars) persists between commands.",
+  description: "Executes a bash command in the persistent terminal. State (like cwd, env vars) persists. WARNING: NEVER run interactive commands (like vim, nano, less, top) or anything that requires user input, as it will freeze the agent.",
   dangerous: true,
   schema: z.object({
     command: z.string().describe("The terminal command to execute"),
@@ -209,7 +233,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "replace_in_file",
-  description: "Replaces all exact occurrences of a string in a file.",
+  description: "Replaces all exact occurrences of a string in a file. WARNING: searchValue must match EXACTLY (including whitespaces/newlines). If you only want to change one specific occurrence among many, use 'patch_file' instead.",
   dangerous: true,
   schema: z.object({
     filePath: z.string(),
@@ -229,7 +253,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "search_files",
-  description: "Searches for a string across files in a directory, ignoring node_modules and .git. Returns absolute paths.",
+  description: "Searches for an exact string pattern across all files in a directory (ignores node_modules/.git). Returns a list of absolute paths with the matched line. Good for finding hardcoded variables or exact function calls.",
   schema: z.object({
     dirPath: z.string(),
     pattern: z.string(),
@@ -244,7 +268,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "patch_file",
-  description: "Replaces a specific range of lines in a file with new content. Useful for large refactors.",
+  description: "Replaces a specific range of lines in a file with new content. StartLine and EndLine are 1-indexed and INCLUSIVE. This is the BEST and SAFEST tool for targeted refactors or minor edits inside large files.",
   dangerous: true,
   schema: z.object({
     filePath: z.string().describe("EXACT ABSOLUTE path to the file"),
@@ -271,7 +295,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "multi_replace_in_file",
-  description: "Replaces multiple non-contiguous line ranges in a file. Allows you to make surgical edits without rewriting the entire file. The tool automatically sorts the replacements from bottom to top, so line indices don't shift.",
+  description: "Replaces multiple non-contiguous line ranges in a file. Allows you to make surgical edits across different parts of a file without rewriting it all. WARNING: Do not overlap line ranges. The tool automatically sorts them bottom-to-top to prevent line shifting.",
   dangerous: true,
   schema: z.object({
     filePath: z.string().describe("EXACT ABSOLUTE path to the file"),
@@ -307,7 +331,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "analyze_codebase",
-  description: "Semantically analyzes a file or directory to extract only the structure.",
+  description: "Semantically analyzes a file or directory to extract ONLY its structure (class signatures, function exports, interfaces). Extremely lightweight. Use this before editing a file if you just want to know its public API.",
   schema: z.object({ path: z.string() }),
   execute: (args) => {
     const targetPath = resolveFilePath(args.path);
@@ -559,15 +583,12 @@ ToolRegistry.register({
       console.log(pc.cyan(`\n[Browser Subagent] Delegating web task: "${args.task}"`));
       
       const subagent = new Agent(".agent_browser_history.json", 15, 10, true, "browser");
-      await subagent.runStep(`You are a Browser Subagent. Complete this task using browser_ tools: ${args.task}\n\nWhen done, use finish_task to return the final answer. DO NOT modify files.`);
-      
-      // Get final message
-      const lastMsg = subagent.globalMessages[subagent.globalMessages.length - 1];
+      const finalAnswer = await subagent.runStep(`You are a Browser Subagent. Complete this task using browser_ tools: ${args.task}\n\nWhen done, use finish_task to return the final answer. DO NOT modify files.`);
       
       // Cleanup browser after subagent finishes
       await browserSession.close();
       
-      return { success: true, report: lastMsg.content };
+      return { success: true, report: finalAnswer };
     } catch (e: any) {
       return { success: false, error: `Browser subagent failed: ${e.message}` };
     }
@@ -576,7 +597,7 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "semantic_search",
-  description: "Performs semantic search (RAG) across the entire TypeScript codebase using natural language. Use this to find specific functionalities instead of reading files blindly. Examples: 'Onde o banco é inicializado?', 'How is authentication handled?'.",
+  description: "Performs RAG semantic search across the entire codebase using natural language. BEST for understanding architecture or finding where a feature is implemented without knowing exact file names. Examples: 'Onde o banco é inicializado?', 'How is user authentication handled?'.",
   schema: z.object({
     query: z.string().describe("Natural language query to search for in the codebase")
   }),
