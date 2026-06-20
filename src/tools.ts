@@ -270,6 +270,42 @@ ToolRegistry.register({
 });
 
 ToolRegistry.register({
+  name: "multi_replace_in_file",
+  description: "Replaces multiple non-contiguous line ranges in a file. Allows you to make surgical edits without rewriting the entire file. The tool automatically sorts the replacements from bottom to top, so line indices don't shift.",
+  dangerous: true,
+  schema: z.object({
+    filePath: z.string().describe("EXACT ABSOLUTE path to the file"),
+    replacements: z.array(z.object({
+      startLine: z.number().describe("The 1-indexed starting line number (inclusive)"),
+      endLine: z.number().describe("The 1-indexed ending line number (inclusive)"),
+      content: z.string().describe("The new content to insert")
+    })).describe("List of chunks to replace.")
+  }),
+  execute: (args) => {
+    const filePath = resolveFilePath(args.filePath);
+    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
+    let content = fs.readFileSync(filePath, "utf-8");
+    const lines = content.split('\n');
+    
+    // Sort replacements descending by startLine to avoid shifting indices for previous replacements
+    const sorted = [...args.replacements].sort((a, b) => b.startLine - a.startLine);
+    
+    for (const r of sorted) {
+      const startIdx = r.startLine - 1;
+      const endIdx = r.endLine - 1;
+      if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) {
+        throw new Error(`Invalid line range ${r.startLine}-${r.endLine}. File has ${lines.length} lines.`);
+      }
+      const newLines = r.content.split('\n');
+      lines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
+    }
+    
+    fs.writeFileSync(filePath, lines.join('\n'), "utf-8");
+    return { success: true, message: `Applied ${sorted.length} patches to ${args.filePath}` };
+  }
+});
+
+ToolRegistry.register({
   name: "analyze_codebase",
   description: "Semantically analyzes a file or directory to extract only the structure.",
   schema: z.object({ path: z.string() }),
@@ -447,26 +483,93 @@ ToolRegistry.register({
 });
 
 ToolRegistry.register({
-  name: "capture_screenshot",
-  description: "Opens a URL in a headless browser and captures a screenshot. Returns a base64 image URL to the LLM.",
+  name: "browser_navigate",
+  description: "Navigate the active browser session to a URL.",
+  schema: z.object({ url: z.string() }),
+  execute: async (args) => {
+    try {
+      const { browserSession } = await import("./browserSession");
+      const page = await browserSession.init();
+      await page.goto(args.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      return await browserSession.extractState();
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "browser_click",
+  description: "Click an element in the browser using a CSS selector.",
+  schema: z.object({ selector: z.string() }),
+  execute: async (args) => {
+    try {
+      const { browserSession } = await import("./browserSession");
+      if (!browserSession.page) return { success: false, error: "Browser not initialized. Use browser_navigate first." };
+      await browserSession.page.click(args.selector, { timeout: 5000 });
+      await browserSession.page.waitForTimeout(1000); // Wait for potential animations/loads
+      return await browserSession.extractState();
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "browser_type",
+  description: "Type text into an input field in the browser.",
+  schema: z.object({ selector: z.string(), text: z.string() }),
+  execute: async (args) => {
+    try {
+      const { browserSession } = await import("./browserSession");
+      if (!browserSession.page) return { success: false, error: "Browser not initialized. Use browser_navigate first." };
+      await browserSession.page.fill(args.selector, args.text, { timeout: 5000 });
+      return await browserSession.extractState();
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "browser_extract",
+  description: "Captures the current state of the browser (text and screenshot).",
+  schema: z.object({}),
+  execute: async () => {
+    try {
+      const { browserSession } = await import("./browserSession");
+      if (!browserSession.page) return { success: false, error: "Browser not initialized." };
+      return await browserSession.extractState();
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "invoke_browser_subagent",
+  description: "Delegates a web automation/QA task to a specialized browser subagent. Use this for testing UI or scraping data. E.g. 'Test the login flow at http://localhost:3000'.",
   schema: z.object({
-    url: z.string().describe("The URL to open (e.g., http://localhost:3000 or a public URL)")
+    task: z.string().describe("The comprehensive web task description for the subagent to perform.")
   }),
   execute: async (args) => {
     try {
-      const { chromium } = await import("playwright");
-      const browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
-      console.log(pc.cyan(`\n[Visão Computacional] Acessando ${args.url}...`));
-      await page.goto(args.url, { waitUntil: 'networkidle', timeout: 15000 });
-      const buffer = await page.screenshot({ type: 'png' });
-      await browser.close();
-      const base64 = buffer.toString('base64');
-      const dataUrl = `data:image/png;base64,${base64}`;
-      console.log(pc.green(`[Visão Computacional] Screenshot capturada com sucesso!`));
-      return { success: true, image_url: dataUrl };
+      const { Agent } = await import("./agent");
+      const { browserSession } = await import("./browserSession");
+      console.log(pc.cyan(`\n[Browser Subagent] Delegating web task: "${args.task}"`));
+      
+      const subagent = new Agent(".agent_browser_history.json", 15, 10, true, "browser");
+      await subagent.runStep(`You are a Browser Subagent. Complete this task using browser_ tools: ${args.task}\n\nWhen done, use finish_task to return the final answer. DO NOT modify files.`);
+      
+      // Get final message
+      const lastMsg = subagent.globalMessages[subagent.globalMessages.length - 1];
+      
+      // Cleanup browser after subagent finishes
+      await browserSession.close();
+      
+      return { success: true, report: lastMsg.content };
     } catch (e: any) {
-      return { success: false, error: `Failed to capture screenshot: ${e.message}` };
+      return { success: false, error: `Browser subagent failed: ${e.message}` };
     }
   }
 });
@@ -526,6 +629,74 @@ Para enviar este código e criar o Pull Request remotamente, o desenvolvedor dev
       return { success: true, report: finalReport };
     } catch (e: any) {
       return { success: false, error: `GitOps failed: ${e.message}. Certifique-se de que não há conflitos ou que o repositório está inicializado.` };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "create_artifact",
+  description: "Creates a markdown artifact to store long reports, analysis, or structured documents instead of cluttering the terminal. Returns the path of the created file.",
+  schema: z.object({
+    title: z.string().describe("A short, URL-friendly title for the artifact (e.g. 'architecture-analysis')"),
+    content: z.string().describe("The markdown content to save")
+  }),
+  execute: (args) => {
+    const artifactDir = path.resolve(".agent_artifacts");
+    if (!fs.existsSync(artifactDir)) {
+      fs.mkdirSync(artifactDir, { recursive: true });
+    }
+    const safeTitle = args.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const filePath = path.join(artifactDir, `${safeTitle}.md`);
+    fs.writeFileSync(filePath, args.content, "utf-8");
+    console.log(pc.green(`\n📝 Artefato criado: ${filePath}`));
+    return { success: true, message: `Artifact saved to ${filePath}` };
+  }
+});
+
+ToolRegistry.register({
+  name: "run_sandboxed_command",
+  description: "Runs a shell command inside an ephemeral Docker container. Use this to safely execute generated python code or run untrusted commands. The workspace is mounted.",
+  dangerous: true,
+  schema: z.object({
+    image: z.string().optional().default("node:20").describe("The docker image to use (e.g. 'python:3.10', 'node:20')"),
+    command: z.string().describe("The command to execute inside the container")
+  }),
+  execute: async (args) => {
+    try {
+      const { exec } = require('child_process');
+      const util = require('util');
+      const execAsync = util.promisify(exec);
+      
+      console.log(pc.yellow(`\n[Sandbox] Executando comando em container Docker (${args.image})...`));
+      
+      const cwd = process.cwd();
+      // Replace double quotes to avoid breaking the bash -c string
+      const safeCommand = args.command.replace(/"/g, '\\"');
+      
+      // We run docker with --rm to clean up, and mount current dir to /workspace
+      const dockerCommand = `docker run --rm -v "${cwd}:/workspace" -w /workspace ${args.image} bash -c "${safeCommand}"`;
+      
+      const { stdout, stderr } = await execAsync(dockerCommand);
+      return { success: true, stdout, stderr };
+    } catch (e: any) {
+      return { success: false, error: e.message, stderr: e.stderr };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "memorize",
+  description: "Saves a rule, learning, or preference to your long-term vector memory. Use this proactively to remember user preferences or project gotchas for future sessions.",
+  schema: z.object({
+    content: z.string().describe("The text to remember. E.g. 'Always use camelCase for variables in this project.'")
+  }),
+  execute: async (args) => {
+    try {
+      const { remember } = await import("./memoryVector");
+      await remember(args.content);
+      return { success: true, message: "Saved to long-term memory." };
+    } catch (e: any) {
+      return { success: false, error: `Failed to memorize: ${e.message}` };
     }
   }
 });

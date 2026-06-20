@@ -45,6 +45,7 @@ export function loadManifest(filePath: string): MCPManifest | null {
 
 export function findLocalManifest(): string | null {
   const possiblePaths = [
+    ".cursor/mcp.json",
     ".mcp.json",
     "mcp.json",
     "manifest.json"
