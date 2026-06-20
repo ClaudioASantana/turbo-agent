@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "bin": {
+    "turbo-agent": "./bin/turbo-agent.js"
+  },
   "scripts": {
     "test": "vitest run"
   },
