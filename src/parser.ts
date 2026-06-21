@@ -45,37 +45,53 @@ function tryParse(str: string): any {
     }
 }
 
-export function extractToolCalls(response: string): any | null {
-  // 0. Remove <think>...</think> blocks completely so they don't interfere with JSON parsing
+export function extractToolCalls(response: string): { id: string, name: string, args: any }[] | null {
   const cleanResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "");
+  const toolCalls: { id: string, name: string, args: any }[] = [];
+  const fakeId = "call_" + Math.random().toString(36).substring(2, 9);
 
-  try {
-    // 1. Try native parse first in case it's perfectly clean
-    return tryParse(cleanResponse);
-  } catch (e) {
-    // 2. Look for JSON markdown blocks ```json ... ```
-    const markdownRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
-    let match;
-    while ((match = markdownRegex.exec(cleanResponse)) !== null) {
-      try {
-        return tryParse(match[1]);
-      } catch (err) {
-        continue; // Try next block if parsing fails
-      }
-    }
+  // Padrão Claude Proxy: <function=nome> { ... }
+  const functionTagRegex = /<function=([^>]+)>\n?({[\s\S]+?})/g;
+  let match;
+  let found = false;
 
-    // 3. Look for the first { and last } as a fallback
-    const start = cleanResponse.indexOf("{");
-    const end = cleanResponse.lastIndexOf("}");
-    if (start !== -1 && end !== -1 && start < end) {
-      const jsonString = cleanResponse.substring(start, end + 1);
-      try {
-        return tryParse(jsonString);
-      } catch (err) {
-        // give up
-      }
-    }
+  while ((match = functionTagRegex.exec(cleanResponse)) !== null) {
+    try {
+      const name = match[1];
+      const args = tryParse(match[2]);
+      toolCalls.push({ id: fakeId, name, args });
+      found = true;
+    } catch (e) { }
   }
 
-  return null;
+  if (found) return toolCalls;
+
+  // Padrão Qwen Local (Ollama): JSON cru ou blocos markdown
+  try {
+    const directObj = tryParse(cleanResponse);
+    if (directObj && typeof directObj === 'object' && !Array.isArray(directObj)) {
+      // Tenta inferir o nome a partir da primeira chave (ex: { "finish_task": { "finalAnswer": "..." } })
+      const keys = Object.keys(directObj);
+      if (keys.length === 1 && typeof directObj[keys[0]] === 'object') {
+         toolCalls.push({ id: fakeId, name: keys[0], args: directObj[keys[0]] });
+         return toolCalls;
+      }
+    }
+  } catch (e) { }
+
+  const markdownRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
+  while ((match = markdownRegex.exec(cleanResponse)) !== null) {
+    try {
+      const parsed = tryParse(match[1]);
+      if (parsed && typeof parsed === 'object') {
+        const keys = Object.keys(parsed);
+        if (keys.length === 1 && typeof parsed[keys[0]] === 'object') {
+           toolCalls.push({ id: fakeId, name: keys[0], args: parsed[keys[0]] });
+           return toolCalls;
+        }
+      }
+    } catch (err) { }
+  }
+
+  return toolCalls.length > 0 ? toolCalls : null;
 }

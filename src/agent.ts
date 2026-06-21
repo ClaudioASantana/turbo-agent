@@ -1,6 +1,8 @@
-import { openai } from "./llmClient";
-import { extractToolCalls } from "./parser";
-import { ToolRegistry, ErrorCategory, ToolResult } from "./tools";
+import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
+import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { ChatOpenAI } from "@langchain/openai";
+import { BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import { ToolRegistry, ErrorCategory } from "./tools";
 import pc from "picocolors";
 import ora from "ora";
 import { getConfig } from "./config";
@@ -10,16 +12,34 @@ import { buildSystemPrompt } from "./promptBuilder";
 import { HistoryManager } from "./historyManager";
 import { SecurityManager } from "./securityManager";
 import { DatadogDispatcher } from "./datadog";
+import { extractToolCalls } from "./parser";
 import { exec } from "child_process";
 import { promisify } from "util";
 const execAsync = promisify(exec);
+
+const AgentState = Annotation.Root({
+  messages: Annotation<BaseMessage[]>({
+    reducer: (x, y) => x.concat(y),
+    default: () => [],
+  }),
+  consecutiveErrors: Annotation<number>({
+    reducer: (x, y) => y, // Sobrescreve com o valor mais recente
+    default: () => 0,
+  }),
+  finalAnswer: Annotation<string | null>({
+    reducer: (x, y) => y,
+    default: () => null,
+  })
+});
 
 export class Agent {
   public historyManager: HistoryManager;
   private maxIterations: number;
   public isSubagent: boolean;
-  private consecutiveErrors: number = 0;
   public persona: string;
+  private graph: any;
+  private checkpointer: SqliteSaver;
+  private threadId: string;
 
   constructor(historyFilePath: string = ".agent_history.json", maxIterations?: number, maxMessages?: number, isSubagent = false, persona = "generic") {
     const config = getConfig();
@@ -35,262 +55,318 @@ export class Agent {
     if (!this.isSubagent) {
       logAuditEvent({ type: "agent_start", timestamp: new Date().toISOString() });
     }
+
+    this.checkpointer = SqliteSaver.fromConnString(".langgraph_memory.db");
+    this.threadId = `session_${Date.now()}`;
+    this.graph = this.buildGraph();
   }
 
-  public loadHistory() {
-    this.historyManager.loadHistory(buildSystemPrompt(this.persona));
+  // Métodos de histórico mantidos para compatibilidade
+  public loadHistory() { this.historyManager.loadHistory(buildSystemPrompt(this.persona)); }
+  public saveHistory() { this.historyManager.saveHistory(); }
+  public clearHistory() { this.historyManager.clearHistory(buildSystemPrompt(this.persona)); }
+
+  // Helpers para converter histórico legado para LangChain Messages
+  private mapToLangChainMessages(messages: any[]): BaseMessage[] {
+    return messages.map(msg => {
+      if (msg.role === "system") return new SystemMessage(msg.content);
+      if (msg.role === "user") return new HumanMessage(msg.content);
+      if (msg.role === "assistant") return new AIMessage(msg.content);
+      return new HumanMessage(msg.content);
+    });
   }
 
-  public saveHistory() {
-    this.historyManager.saveHistory();
+  private mapFromLangChainMessages(messages: BaseMessage[]): any[] {
+    return messages.map(msg => {
+      let role = "user";
+      if (msg instanceof SystemMessage) role = "system";
+      else if (msg instanceof AIMessage) role = "assistant";
+      else if (msg instanceof ToolMessage) role = "user"; // Simulando o comportamento legado
+      return { role, content: msg.content };
+    });
   }
 
-  public clearHistory() {
-    this.historyManager.clearHistory(buildSystemPrompt(this.persona));
-  }
+  private buildGraph() {
+    // 1. Architect Node: Planejamento inicial
+    const architectNode = async (state: typeof AgentState.State, config: any) => {
+      const chat = new ChatOpenAI({
+        modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
+        temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
+        maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
+        openAIApiKey: process.env.OPENAI_API_KEY || "dummy",
+        configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
+      });
+      
+      // O Arquiteto recebe o contexto mas com uma diretriz específica
+      const sysMsg = new SystemMessage("Você é o Arquiteto de Software. Analise o pedido do usuário e crie um plano técnico passo-a-passo (Spec) de no máximo 3 linhas para o Programador executar. NÃO responda ao usuário diretamente e NÃO use ferramentas, apenas planeje.");
+      const response = await chat.invoke([sysMsg, ...state.messages], config);
+      response.name = "architect";
 
-  public async runStep(userPrompt: string): Promise<string | void> {
-    // --- MEMÓRIA VETORIAL ---
-    try {
-      const { recall } = await import("./memoryVector");
-      const memories = await recall(userPrompt);
-      const memoryContext = memories.length > 0 ? memories.join("\n\n---\n") : "Nenhuma preferência ou regra salva no contexto atual.";
-      if (this.historyManager.messages.length > 0 && this.historyManager.messages[0].role === "system") {
-        this.historyManager.updateSystemPrompt(buildSystemPrompt(this.persona, memoryContext));
-      }
-    } catch (e: any) {
-      Logger.warn(`Falha ao injetar memória vetorial: ${e.message}`);
-    }
-    // ------------------------
+      return { messages: [response] };
+    };
 
-    this.historyManager.addMessage("user", userPrompt);
-
-    let loops = 0;
-    while (loops < this.maxIterations) {
-      loops++;
-
-      // Memória Inteligente (Auto-Summarization)
-      await this.historyManager.compactMemoryIfNecessary();
-      const isJson = getConfig().logFormat === 'json';
-
-      const spinner = isJson ? null : ora(pc.blue("O Agente está pensando...")).start();
-      if (isJson) Logger.info("O Agente está pensando...");
-      let fullReply = "";
+    // 2. Coder Node: O LLM original que tem acesso às ferramentas
+    const coderNode = async (state: typeof AgentState.State, config: any) => {
       try {
-        const stream = await openai.chat.completions.create({
-          model: process.env.LLM_MODEL || "qwen-35b-turboquant",
-          messages: this.historyManager.messages,
+        const chat = new ChatOpenAI({
+          modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
           temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
-          top_p: process.env.LLM_TOP_P ? parseFloat(process.env.LLM_TOP_P) : 0.95,
-          presence_penalty: process.env.LLM_PRESENCE_PENALTY ? parseFloat(process.env.LLM_PRESENCE_PENALTY) : 0.0,
-          frequency_penalty: process.env.LLM_FREQUENCY_PENALTY ? parseFloat(process.env.LLM_FREQUENCY_PENALTY) : 0.0,
-          max_tokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
-          stream: true,
+          maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
+          openAIApiKey: process.env.OPENAI_API_KEY || "dummy",
+          configuration: {
+            baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1"
+          }
         });
-        
-        let firstChunk = true;
-        let isInsideJson = false;
-        for await (const chunk of stream) {
-            if (firstChunk) {
-                if (spinner) spinner.stop();
-                if (!this.isSubagent) {
-                    if (!isJson) process.stdout.write(pc.cyan("\n🤖 Turbo-Agent Raciocinando...\n"));
-                    else Logger.debug("Turbo-Agent Raciocinando...");
-                }
-                firstChunk = false;
-            }
-            const content = chunk.choices[0]?.delta?.content || "";
-            if (content) {
-                fullReply += content;
-                
-                // Detects if the agent is starting to output the JSON tool call block
-                if (!isInsideJson && (fullReply.includes("```json") || (fullReply.includes("{") && fullReply.includes('"tool"')))) {
-                   isInsideJson = true;
-                   if (!this.isSubagent) {
-                       if (!isJson) process.stdout.write(pc.dim("\n[Gerando código/parâmetros em background...]\n"));
-                       else Logger.debug("Gerando código/parâmetros em background...");
-                   }
-                }
 
-                if (!this.isSubagent && !isInsideJson && !isJson) {
-                   process.stdout.write(pc.dim(content));
-                }
+        const tools = ToolRegistry.getSchemas();
+        const chatWithTools = chat.bindTools(tools);
+
+        // O Coder recebe o plano do arquiteto como parte das messages
+        const sysMsg = new SystemMessage("Você é o Programador (Coder). Siga rigorosamente o plano que o Arquiteto acabou de traçar na última mensagem. Use as ferramentas necessárias. Se terminar, use a ferramenta finish_task.");
+        const response = await chatWithTools.invoke([sysMsg, ...state.messages], config);
+        response.name = "coder";
+
+        // Parser Híbrido: Se o modelo falhar na API nativa e cuspir texto puro
+        if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
+            const extracted = extractToolCalls(response.content.toString());
+            if (extracted && extracted.length > 0) {
+               response.tool_calls = extracted;
             }
         }
-        if (!this.isSubagent && !isJson) process.stdout.write("\n\n");
+
+        return { messages: [response] };
       } catch (error: any) {
-        if (spinner) spinner.fail(pc.red(`Erro na API do LLM: ${error.message}`));
-        else Logger.error(`Erro na API do LLM: ${error.message}`);
-        Logger.warn("Por favor, verifique se o servidor local do LLM está rodando e acessível.");
-        break; // Sai do loop e volta para o prompt do usuário
+        Logger.error(`Erro na API do LLM (Coder): ${error.message}`);
+        return { 
+          messages: [new HumanMessage(`Erro de API ao chamar o modelo: ${error.message}. Verifique a conexão.`)],
+          consecutiveErrors: state.consecutiveErrors + 1
+        };
       }
+    };
 
-      const reply = fullReply;
+    // 3. QA Node: Avalia a resposta antes de enviar ao usuário
+    const qaNode = async (state: typeof AgentState.State, config: any) => {
+      // QA só age se o Coder disse que acabou
+      if (!state.finalAnswer) return { messages: [] };
 
-      this.historyManager.addMessage("assistant", reply);
+      const chat = new ChatOpenAI({
+        modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
+        temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
+        maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
+        openAIApiKey: process.env.OPENAI_API_KEY || "dummy",
+        configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
+      });
+      
+      const sysMsg = new SystemMessage(`Você é o Revisor de Qualidade (QA). O Coder declarou que finalizou a tarefa com a resposta: "${state.finalAnswer}". 
+Se a tarefa parece cumprida, responda estritamente a palavra "APROVADO". 
+Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Coder corrigir.`);
+      
+      const response = await chat.invoke([sysMsg, ...state.messages], config);
+      response.name = "qa";
 
-      const toolCall = extractToolCalls(reply);
+      if (response.content.toString().includes("APROVADO")) {
+         return { messages: [response] };
+      } else {
+         // Reabre a tarefa para o Coder consertar
+         return { messages: [response], finalAnswer: null }; 
+      }
+    };
 
-      if (toolCall && toolCall.tool) {
-        if (toolCall.tool === "finish_task") {
-          const finalAnswer = toolCall.args?.finalAnswer || 'Concluído';
+    // Tool Node: Executa a ferramenta e faz o Self-Healing
+    const toolNode = async (state: typeof AgentState.State) => {
+      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+      const toolCalls = lastMessage.tool_calls || [];
+      const newMessages: BaseMessage[] = [];
+      let currentErrors = 0;
+      let finalAnswer: string | null = null;
+
+      for (const call of toolCalls) {
+        const toolName = call.name;
+        const args = call.args;
+
+        if (toolName === "finish_task") {
+          finalAnswer = args.finalAnswer || 'Concluído';
           if (!this.isSubagent) {
-            if (!isJson) console.log(pc.green(`\n🤖 Turbo-Agent:\n${finalAnswer}\n`));
-            else Logger.info(`Finalizado`, { finalAnswer });
+             console.log(pc.green(`\n🤖 Turbo-Agent Finalizou:\n${finalAnswer}\n`));
           }
-          this.consecutiveErrors = 0; // Reseta erros ao concluir
-          await DatadogDispatcher.flush();
-          return finalAnswer;
+          newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", content: "Task finished." }));
+          continue;
         }
 
         if (!this.isSubagent) {
-          if (this.consecutiveErrors > 0) {
-            if (!isJson) console.log(pc.yellow(`\n🔧 Executando ferramenta: ${toolCall.tool} (Auto-Recuperação ${this.consecutiveErrors}/3)`));
-            else Logger.info(`Executando ferramenta (Auto-Recuperação ${this.consecutiveErrors}/3)`, { tool: toolCall.tool });
-          } else {
-            if (!isJson) console.log(pc.yellow(`\n🔧 Executando ferramenta: ${toolCall.tool}`));
-            else Logger.info(`Executando ferramenta`, { tool: toolCall.tool });
-          }
-          let argsPreview = JSON.stringify(toolCall.args || {});
-          if (argsPreview.length > 150) {
-              argsPreview = argsPreview.substring(0, 150) + pc.gray(" ... [argumentos ocultos para não poluir a tela]");
-          }
-          if (!isJson) console.log(pc.gray(argsPreview));
-          else Logger.debug(`Argumentos da ferramenta`, { args: toolCall.args });
+           console.log(pc.yellow(`\n🔧 Executando ferramenta nativa: ${toolName}`));
         }
 
-        const tool = ToolRegistry.getTool(toolCall.tool);
-        if (!tool) {
-            Logger.error(`Ferramenta desconhecida: ${toolCall.tool}`);
-            this.historyManager.addMessage("user", `Error: Tool '${toolCall.tool}' does not exist.`);
-            continue;
-        }
-
-        // Security checks: Permissions
-        const auth = await SecurityManager.authorize(toolCall.tool, toolCall.args, this.isSubagent);
+        // Security
+        const auth = await SecurityManager.authorize(toolName, args, this.isSubagent);
         if (!auth.approved) {
-           this.historyManager.addMessage("user", auth.userMessage);
+           newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", content: auth.userMessage }));
+           currentErrors++;
            continue;
         }
 
-        // Execute tool with validation
-        let spinnerTool;
-        if (!this.isSubagent && toolCall.tool !== "request_user_approval") {
-          spinnerTool = isJson ? null : ora(pc.cyan(`Executando ${toolCall.tool}...`)).start();
-        }
-        
-        auditToolCall(toolCall.tool, toolCall.args || {});
-        let toolResult = await ToolRegistry.execute(toolCall.tool, toolCall.args);
-        
-        // --- SELF-HEALING (LSP/Compiler Check) ---
+        auditToolCall(toolName, args);
+        let toolResult = await ToolRegistry.execute(toolName, args);
+
+        // Self-Healing TypeScript
         const writeTools = ["write_file", "replace_in_file", "patch_file", "multi_replace_in_file"];
-        let tscError = "";
-        if (toolResult.success && writeTools.includes(toolCall.tool)) {
-          if (!this.isSubagent && spinnerTool) {
-             spinnerTool.text = pc.cyan(`Executando verificação de sintaxe (Self-Healing)...`);
-          }
-          try {
+        if (toolResult.success && writeTools.includes(toolName)) {
+           try {
              await execAsync("npx tsc --noEmit");
-          } catch (e: any) {
-             tscError = e.stdout || e.stderr || e.message;
-             // We inject the error into the result so the LLM sees it
+           } catch (e: any) {
              toolResult.success = false;
              toolResult.category = ErrorCategory.EXECUTION;
-             toolResult.error = `O arquivo foi salvo fisicamente, mas a compilação do TypeScript falhou com os seguintes erros:\n${tscError}`;
-          }
-        }
-        // ------------------------------------------
-
-        auditToolResult(toolCall.tool, JSON.stringify(toolResult));
-        
-        if (!toolResult.success) {
-          this.consecutiveErrors++;
-        } else {
-          this.consecutiveErrors = 0;
-        }
-
-        if (!this.isSubagent && spinnerTool) {
-          if (toolResult.success) {
-              spinnerTool.succeed(pc.green(`Ferramenta concluída`));
-          } else {
-              if (this.consecutiveErrors >= 3) {
-                  spinnerTool.fail(pc.red(`Erro crítico na ferramenta.`));
-              } else {
-                  spinnerTool.warn(pc.yellow(`Falha (Self-Healing ativado). Iniciando Auto-Recuperação...`));
-              }
-          }
-        } else if (!this.isSubagent && isJson) {
-           if (!toolResult.success && this.consecutiveErrors >= 3) Logger.error(`Erro crítico na ferramenta: ${toolCall.tool}`);
-           else if (!toolResult.success) Logger.warn(`Falha na ferramenta (Self-Healing ativado): ${toolCall.tool}`);
-        }
-
-        let contentPayload: any;
-        
-        if (toolResult.success && toolResult.image_url) {
-            contentPayload = [
-              { type: "text", text: `Tool '${toolCall.tool}' captured a screenshot successfully:` },
-              { type: "image_url", image_url: { url: toolResult.image_url } }
-            ];
-        } else {
-            let resultString = JSON.stringify(toolResult);
-            if (resultString.length > 3000) {
-              resultString = resultString.substring(0, 3000) + "\n\n... [Saída truncada para economizar tokens. Se precisar do resto, refine a busca ou use paginação.]";
-            }
-
-            if (!toolResult.success && this.consecutiveErrors < 3) {
-                let contextMessage = "A execução falhou.";
-                if (toolResult.category === ErrorCategory.VALIDATION) {
-                    contextMessage = "Os argumentos fornecidos não correspondem ao schema esperado para esta ferramenta. Verifique o schema e tente novamente com os tipos corretos.";
-                } else if (toolResult.category === ErrorCategory.EXECUTION) {
-                    contextMessage = "A ferramenta falhou durante a sua execução. Analise o erro para entender se foi um problema de ambiente, comando inválido ou arquivo inexistente.";
-                }
-
-                contentPayload = `Tool '${toolCall.tool}' failed with error:\n${resultString}\n\n[SELF-HEALING]: ${contextMessage} Não peça desculpas ou desista. Analise o erro cuidadosamente, corrija e tente novamente. Tentativa ${this.consecutiveErrors} de 3.`;
-            } else {
-                contentPayload = `Tool '${toolCall.tool}' returned:\n${resultString}`;
-            }
-        }
-
-        this.historyManager.addMessage("user", contentPayload);
-        
-        if (this.consecutiveErrors >= 3) {
-            if (!this.isSubagent) {
-               if (!isJson) console.log(pc.red("\n[Circuit Breaker] Abortando execução devido a 3 falhas consecutivas da ferramenta."));
-               else Logger.error("Circuit Breaker ativado (3 falhas consecutivas na ferramenta).");
-            }
-            await DatadogDispatcher.flush();
-            return "Erro crítico: O agente falhou 3 vezes consecutivas na mesma operação e o Circuit Breaker foi ativado.";
-        }
-
-      } else {
-        this.consecutiveErrors++;
-        if (!this.isSubagent) {
-           if (this.consecutiveErrors >= 3) {
-               if (!isJson) console.log(pc.red(`[Aviso]: Falha crítica no parser JSON após 3 tentativas.`));
-               else Logger.error("Falha crítica no parser JSON após 3 tentativas.");
-           } else {
-               if (!isJson) console.log(pc.yellow(`[Aviso]: Não foi possível extrair a ferramenta. Iniciando Auto-Recuperação JSON (${this.consecutiveErrors}/3)...`));
-               else Logger.warn(`Auto-Recuperação JSON iniciada (${this.consecutiveErrors}/3)`);
+             toolResult.error = `O arquivo foi salvo, mas a compilação falhou:\n${e.stdout || e.message}`;
            }
         }
-        
-        this.historyManager.addMessage("user", `[PARSING_ERROR]: I could not parse a valid JSON tool call from your response. Do not add conversational text. Output ONLY the JSON object with 'tool' and 'args' keys. Attempt ${this.consecutiveErrors} of 3.`);
-        
-        if (this.consecutiveErrors >= 3) {
-            if (!this.isSubagent) {
-               if (!isJson) console.log(pc.red("\n[Circuit Breaker] Abortando execução por falhas de parsing JSON consecutivas."));
-               else Logger.error("Circuit Breaker ativado (falhas de parsing JSON consecutivas).");
-            }
-            await DatadogDispatcher.flush();
-            return "Erro crítico: O agente falhou 3 vezes consecutivas ao formatar a resposta JSON e o Circuit Breaker foi ativado.";
+
+        auditToolResult(toolName, JSON.stringify(toolResult));
+
+        let resultString = JSON.stringify(toolResult);
+        if (resultString.length > 3000) {
+           resultString = resultString.substring(0, 3000) + "\n... [Saída truncada]";
+        }
+
+        if (!toolResult.success) {
+           currentErrors++;
+           const errorMsg = `Tool failed:\n${resultString}\n\n[SELF-HEALING]: Analise o erro, corrija os argumentos e tente novamente. Tentativa ${state.consecutiveErrors + 1} de 3.`;
+           newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", content: errorMsg }));
+        } else {
+           newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", content: resultString }));
         }
       }
-    }
 
-    if (loops >= this.maxIterations) {
-      Logger.error("Limite máximo de iterações atingido. Abortando.");
-      await DatadogDispatcher.flush();
-      return "Error: Maximum iteration limit reached. The subagent aborted before finishing.";
+      return { 
+        messages: newMessages, 
+        consecutiveErrors: currentErrors > 0 ? state.consecutiveErrors + 1 : 0,
+        finalAnswer
+      };
+    };
+
+    // Lógica de Roteamento (Edges)
+    const routeFromCoder = (state: typeof AgentState.State) => {
+      if (state.consecutiveErrors >= 3) return END; // Circuit Breaker
+      
+      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+      // Se ele chamou ferramentas, vai pro Node Tools
+      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
+        return "tools";
+      }
+      
+      // Se ele não chamou ferramentas, ou ele bugou e retornou texto puro, ou ele chamou finish_task.
+      // Em ambos os casos, a gente avalia se tem finalAnswer.
+      if (state.finalAnswer) return "qaNode";
+      return END; 
+    };
+
+    const routeFromQA = (state: typeof AgentState.State) => {
+      // Se o QA anulou o finalAnswer, significa que ele reprovou e quer que o Coder refaça.
+      if (!state.finalAnswer) return "coderNode";
+      return END;
+    };
+
+    const workflow = new StateGraph(AgentState)
+      .addNode("architectNode", architectNode)
+      .addNode("coderNode", coderNode)
+      .addNode("qaNode", qaNode)
+      .addNode("tools", toolNode)
+      
+      .addEdge(START, "architectNode")
+      .addEdge("architectNode", "coderNode")
+      
+      .addConditionalEdges("coderNode", routeFromCoder)
+      .addEdge("tools", "coderNode")
+      
+      .addConditionalEdges("qaNode", routeFromQA);
+
+    return workflow.compile({ checkpointer: this.checkpointer });
+  }
+
+  public async runStep(userPrompt: string): Promise<string | void> {
+    const isJson = getConfig().logFormat === 'json';
+    
+    // Na primeira iteração da sessão, injetamos o system prompt legado.
+    // O MemorySaver cuidará de não duplicar isso nas próximas rodadas.
+    const stateSnapshot = await this.graph.getState({ configurable: { thread_id: this.threadId } });
+    const isFirstRun = !stateSnapshot?.values?.messages || stateSnapshot.values.messages.length === 0;
+
+    let initialMessages: BaseMessage[] = [];
+    if (isFirstRun) {
+       initialMessages = this.mapToLangChainMessages(this.historyManager.messages);
+    }
+    initialMessages.push(new HumanMessage(userPrompt));
+
+    // Prepara o estado inicial. Note que só passamos as mensagens NOVAS.
+    let currentState: any = {
+      messages: initialMessages,
+      consecutiveErrors: 0,
+      finalAnswer: null
+    };
+
+    try {
+       // Executa o grafo com persistência nativa (thread_id)
+       const events = this.graph.streamEvents(currentState, { 
+         version: "v2", 
+         recursionLimit: this.maxIterations,
+         configurable: { thread_id: this.threadId }
+       });
+
+       let printedAgentHeader = false;
+
+       for await (const event of events) {
+         if (event.event === "on_chat_model_stream") {
+            const chunk = event.data.chunk;
+            const nodeName = chunk.name || "agent"; // architect, coder ou qa
+            
+            // Apenas imprime conteúdo textual, ignora tool_calls no terminal para não poluir
+            if (!this.isSubagent && !isJson && chunk.content) {
+               if (printedAgentHeader !== nodeName) {
+                  let prefix = "🤖 Coder";
+                  if (nodeName === "architect") prefix = "📐 Arquiteto";
+                  if (nodeName === "qa") prefix = "🕵️ QA";
+                  
+                  process.stdout.write(pc.cyan(`\n\n${prefix} Raciocinando...\n`));
+                  printedAgentHeader = nodeName;
+               }
+               process.stdout.write(pc.cyan(chunk.content));
+            }
+         } else if (event.event === "on_chain_end" && event.name === "LangGraph") {
+            // Quando o Grafo termina completamente, ele devolve o estado final
+            currentState = event.data.output;
+         }
+       }
+       
+       if (!this.isSubagent && !isJson) {
+          process.stdout.write("\n\n");
+       }
+       
+       const result = currentState;
+
+       await DatadogDispatcher.flush();
+
+       // Fase 2: O historyManager.ts foi desacoplado como backup!
+       // A árvore de estado (messages) agora vive eternamente na memória do MemorySaver.
+       // Mantemos a conversão para arquivo JSON apenas para compatibilidade legada e logs.
+       try {
+         const finalSnapshot = await this.graph.getState({ configurable: { thread_id: this.threadId } });
+         if (finalSnapshot?.values?.messages) {
+            this.historyManager.messages = this.mapFromLangChainMessages(finalSnapshot.values.messages);
+            this.historyManager.saveHistory();
+         }
+       } catch (e: any) {
+         Logger.warn("Erro ao fazer backup legado do histórico: " + e.message);
+       }
+
+       if (result.consecutiveErrors >= 3) {
+          console.log(pc.red("\n[Circuit Breaker] Abortando execução por falhas repetidas."));
+          return "Erro crítico: O agente falhou 3 vezes consecutivas e o Circuit Breaker foi ativado.";
+       }
+
+       return result.finalAnswer || "Execução concluída sem resposta final definida.";
+
+    } catch (e: any) {
+       Logger.error(`Erro crítico no LangGraph: ${e.message}`);
+       return `Error: ${e.message}`;
     }
   }
 }
