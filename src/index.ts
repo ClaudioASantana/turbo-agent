@@ -86,7 +86,18 @@ async function main() {
       continue;
     }
 
-    await agent.runStep(prompt);
+    const result: any = await agent.runStep(prompt);
+    
+    // Fase 1 HITL: Se pausou, pergunta pro usuário
+    if (result && result.status === 'paused') {
+      const aprovacao = await promptUser(pc.yellow("⚠️ O Arquiteto montou o plano. Deseja permitir que o Coder execute? (S/N): "));
+      if (aprovacao.trim().toLowerCase() === "s") {
+         await agent.runStep(null); // Retoma
+      } else {
+         await agent.abortPlan(); // Cancela
+         console.log(pc.red("Plano abortado."));
+      }
+    }
   }
 }
 

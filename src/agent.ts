@@ -1,4 +1,4 @@
-import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
+import { StateGraph, START, END, Annotation, Send } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { ChatOpenAI } from "@langchain/openai";
 import { BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
@@ -29,6 +29,14 @@ const AgentState = Annotation.Root({
   finalAnswer: Annotation<string | null>({
     reducer: (x, y) => y,
     default: () => null,
+  }),
+  context: Annotation<string>({
+    reducer: (x, y) => y,
+    default: () => "",
+  }),
+  sender: Annotation<string>({
+    reducer: (x, y) => y,
+    default: () => "coderNode",
   })
 });
 
@@ -87,6 +95,36 @@ export class Agent {
   }
 
   private buildGraph() {
+    // 0. Explorer Node: Mapeia o repositório (Agentic RAG)
+    const explorerNode = async (state: typeof AgentState.State, config: any) => {
+      // Se ele já finalizou a exploração
+      if (state.finalAnswer && state.sender === "explorerNode") {
+         return { context: state.finalAnswer, finalAnswer: null, sender: "architectNode" };
+      }
+
+      const chat = new ChatOpenAI({
+        modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
+        temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
+        maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
+        openAIApiKey: process.env.OPENAI_API_KEY || "dummy",
+        configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
+      });
+
+      const tools = ToolRegistry.getSchemas();
+      const chatWithTools = chat.bindTools(tools);
+      
+      const sysMsg = new SystemMessage("Você é o Explorador (Agentic RAG). Entenda o pedido do usuário e vasculhe os arquivos usando list_files ou read_file para encontrar onde a mudança deve ocorrer. Quando tiver os caminhos exatos, chame finish_task reportando os caminhos encontrados.");
+      const response = await chatWithTools.invoke([sysMsg, ...state.messages], config);
+      response.name = "explorer";
+
+      if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
+          const extracted = extractToolCalls(response.content.toString());
+          if (extracted && extracted.length > 0) response.tool_calls = extracted;
+      }
+
+      return { messages: [response], sender: "explorerNode" };
+    };
+
     // 1. Architect Node: Planejamento inicial
     const architectNode = async (state: typeof AgentState.State, config: any) => {
       const chat = new ChatOpenAI({
@@ -97,12 +135,14 @@ export class Agent {
         configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
       });
       
-      // O Arquiteto recebe o contexto mas com uma diretriz específica
-      const sysMsg = new SystemMessage("Você é o Arquiteto de Software. Analise o pedido do usuário e crie um plano técnico passo-a-passo (Spec) de no máximo 3 linhas para o Programador executar. NÃO responda ao usuário diretamente e NÃO use ferramentas, apenas planeje.");
+      const sysMsg = new SystemMessage(`Você é o Arquiteto de Software. 
+Contexto encontrado pelo explorador sobre o repositório: ${state.context || 'Nenhum'}. 
+Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO use ferramentas. Formate explicitamente cada passo começando com "Passo 1:", "Passo 2:", etc.`);
+      
       const response = await chat.invoke([sysMsg, ...state.messages], config);
       response.name = "architect";
 
-      return { messages: [response] };
+      return { messages: [response], sender: "architectNode" };
     };
 
     // 2. Coder Node: O LLM original que tem acesso às ferramentas
@@ -134,7 +174,7 @@ export class Agent {
             }
         }
 
-        return { messages: [response] };
+        return { messages: [response], sender: "coderNode" };
       } catch (error: any) {
         Logger.error(`Erro na API do LLM (Coder): ${error.message}`);
         return { 
@@ -244,19 +284,47 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
     };
 
     // Lógica de Roteamento (Edges)
+    const routeFromExplorer = (state: typeof AgentState.State) => {
+      // Se chamou ferramenta (ex: list_files)
+      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
+      
+      // Se terminou de explorar (reportou finalAnswer via finish_task)
+      if (state.context) return "architectNode";
+      return "architectNode"; // Fallback de segurança se ele só gerou texto
+    };
+
+    const routeFromArchitect = (state: typeof AgentState.State) => {
+      const lastMessage = state.messages[state.messages.length - 1];
+      const content = lastMessage.content.toString();
+      
+      // Quebra o plano em passos paralelos se o LLM seguiu a formatação
+      const plans = content.split(/Passo \d+:/i).filter(p => p.trim().length > 10);
+      
+      if (plans.length > 1) {
+         // Paralelismo agressivo: Cria um nó Coder independente para cada Passo!
+         return plans.map(plan => new Send("coderNode", { 
+           messages: [new SystemMessage("TAREFA ISOLADA. Siga este plano: " + plan)], 
+           sender: "coderNode" 
+         }));
+      }
+      return "coderNode";
+    };
+
     const routeFromCoder = (state: typeof AgentState.State) => {
       if (state.consecutiveErrors >= 3) return END; // Circuit Breaker
       
       const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
       // Se ele chamou ferramentas, vai pro Node Tools
-      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
-        return "tools";
-      }
+      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
       
-      // Se ele não chamou ferramentas, ou ele bugou e retornou texto puro, ou ele chamou finish_task.
-      // Em ambos os casos, a gente avalia se tem finalAnswer.
       if (state.finalAnswer) return "qaNode";
       return END; 
+    };
+
+    const routeFromTools = (state: typeof AgentState.State) => {
+      // Retorna a execução para quem chamou a ferramenta (Explorer ou Coder)
+      return state.sender === "explorerNode" ? "explorerNode" : "coderNode";
     };
 
     const routeFromQA = (state: typeof AgentState.State) => {
@@ -266,42 +334,64 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
     };
 
     const workflow = new StateGraph(AgentState)
+      .addNode("explorerNode", explorerNode)
       .addNode("architectNode", architectNode)
       .addNode("coderNode", coderNode)
       .addNode("qaNode", qaNode)
       .addNode("tools", toolNode)
       
-      .addEdge(START, "architectNode")
-      .addEdge("architectNode", "coderNode")
+      .addEdge(START, "explorerNode")
+      
+      .addConditionalEdges("explorerNode", routeFromExplorer)
+      .addConditionalEdges("architectNode", routeFromArchitect)
       
       .addConditionalEdges("coderNode", routeFromCoder)
-      .addEdge("tools", "coderNode")
+      .addConditionalEdges("tools", routeFromTools)
       
       .addConditionalEdges("qaNode", routeFromQA);
 
-    return workflow.compile({ checkpointer: this.checkpointer });
+    return workflow.compile({ 
+      checkpointer: this.checkpointer,
+      interruptBefore: ["coderNode"]
+    });
   }
 
-  public async runStep(userPrompt: string): Promise<string | void> {
+  public async abortPlan() {
+    // Injeta mensagem de rejeição no estado para o Coder (se quisermos) ou apenas finaliza.
+    // O mais simples é apenas limpar o estado.
+    const stateSnapshot = await this.graph.getState({ configurable: { thread_id: this.threadId } });
+    await this.graph.updateState(
+      { configurable: { thread_id: this.threadId } }, 
+      { messages: [new HumanMessage("PLANO ABORTADO PELO USUÁRIO. Cancele a operação e chame finish_task.")] }
+    );
+    await this.runStep(null);
+  }
+
+  public async runStep(userPrompt: string | null): Promise<string | void | { status: 'paused' }> {
     const isJson = getConfig().logFormat === 'json';
     
     // Na primeira iteração da sessão, injetamos o system prompt legado.
-    // O MemorySaver cuidará de não duplicar isso nas próximas rodadas.
+    // O SqliteSaver cuidará de não duplicar isso nas próximas rodadas.
     const stateSnapshot = await this.graph.getState({ configurable: { thread_id: this.threadId } });
     const isFirstRun = !stateSnapshot?.values?.messages || stateSnapshot.values.messages.length === 0;
 
     let initialMessages: BaseMessage[] = [];
-    if (isFirstRun) {
+    if (isFirstRun && userPrompt) {
        initialMessages = this.mapToLangChainMessages(this.historyManager.messages);
     }
-    initialMessages.push(new HumanMessage(userPrompt));
+    
+    if (userPrompt) {
+      initialMessages.push(new HumanMessage(userPrompt));
+    }
 
-    // Prepara o estado inicial. Note que só passamos as mensagens NOVAS.
-    let currentState: any = {
+    // Prepara o estado inicial. Se for null (resumo), passamos null.
+    let currentState: any = userPrompt ? {
       messages: initialMessages,
       consecutiveErrors: 0,
-      finalAnswer: null
-    };
+      finalAnswer: null,
+      context: "",
+      sender: "coderNode"
+    } : null;
 
     try {
        // Executa o grafo com persistência nativa (thread_id)
@@ -322,6 +412,7 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
             if (!this.isSubagent && !isJson && chunk.content) {
                if (printedAgentHeader !== nodeName) {
                   let prefix = "🤖 Coder";
+                  if (nodeName === "explorer") prefix = "🧭 Explorador";
                   if (nodeName === "architect") prefix = "📐 Arquiteto";
                   if (nodeName === "qa") prefix = "🕵️ QA";
                   
@@ -339,8 +430,16 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
        if (!this.isSubagent && !isJson) {
           process.stdout.write("\n\n");
        }
+
+       // Checa se foi interrompido (HITL)
+       const finalSnapshot = await this.graph.getState({ configurable: { thread_id: this.threadId } });
+       if (finalSnapshot.next && finalSnapshot.next.includes("coderNode")) {
+          // O grafo pausou!
+          return { status: 'paused' };
+       }
        
        const result = currentState;
+
 
        await DatadogDispatcher.flush();
 
