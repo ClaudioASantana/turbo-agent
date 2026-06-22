@@ -139,11 +139,49 @@ class Registry {
   }
 
   getSchemas() {
-    return Array.from(this.tools.values()).map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: (tool as any)._mcpJsonSchema || zodToJsonSchema(tool.schema)
-    }));
+    // Import here to avoid top-level require issues if any
+    const { convertToOpenAITool } = require("@langchain/core/utils/function_calling");
+    
+    const cleanSchemaParams = (params: any) => {
+      if (!params) return;
+      delete params.$schema;
+      delete params.additionalProperties;
+      
+      if (params.properties) {
+        for (const key of Object.keys(params.properties)) {
+          if (params.properties[key].default !== undefined) {
+            delete params.properties[key].default;
+          }
+        }
+      }
+    };
+
+    return Array.from(this.tools.values()).map(tool => {
+      if ((tool as any)._mcpJsonSchema) {
+        let mcpSchema = JSON.parse(JSON.stringify((tool as any)._mcpJsonSchema));
+        if (Object.keys(mcpSchema).length === 0) {
+          mcpSchema = { type: "object", properties: {} };
+        } else if (!mcpSchema.type) {
+          mcpSchema.type = "object";
+        }
+        
+        cleanSchemaParams(mcpSchema);
+        
+        return {
+          type: "function",
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: mcpSchema
+          }
+        };
+      }
+      
+      const oaiTool = convertToOpenAITool(tool as any);
+      cleanSchemaParams(oaiTool.function.parameters);
+      
+      return oaiTool;
+    });
   }
 
   async execute(name: string, args: any): Promise<ToolResult> {
@@ -257,12 +295,12 @@ ToolRegistry.register({
   schema: z.object({
     dirPath: z.string(),
     pattern: z.string(),
-    isCaseSensitive: z.boolean().optional().default(false)
+    isCaseSensitive: z.boolean().optional()
   }),
   execute: (args) => {
     const dir = path.resolve(args.dirPath);
     if (!fs.existsSync(dir)) throw new Error(`Directory not found: ${args.dirPath}`);
-    return { success: true, results: searchFilesHelper(dir, args.pattern, args.isCaseSensitive) };
+    return { success: true, results: searchFilesHelper(dir, args.pattern, args.isCaseSensitive ?? false) };
   }
 });
 
@@ -429,11 +467,12 @@ ToolRegistry.register({
 ToolRegistry.register({
   name: "read_process_logs",
   description: "Reads the recent logs of a background process.",
-  schema: z.object({ id: z.string(), lines: z.number().optional().default(100) }),
+  schema: z.object({ id: z.string(), lines: z.number().optional() }),
   execute: (args) => {
     const proc = backgroundProcesses[args.id];
     if (!proc) throw new Error(`No running process found with id '${args.id}'.`);
-    return { success: true, logs: proc.logs.slice(-Math.abs(args.lines)).join('\n') };
+    const logLines = proc.logs.slice(-(args.lines ?? 100));
+    return { success: true, logs: logLines.join('\n') };
   }
 });
 
@@ -679,7 +718,7 @@ ToolRegistry.register({
   description: "Runs a shell command inside an ephemeral Docker container. Use this to safely execute generated python code or run untrusted commands. The workspace is mounted.",
   dangerous: true,
   schema: z.object({
-    image: z.string().optional().default("node:20").describe("The docker image to use (e.g. 'python:3.10', 'node:20')"),
+    image: z.string().optional().describe("The docker image to use (e.g. 'python:3.10', 'node:20')"),
     command: z.string().describe("The command to execute inside the container")
   }),
   execute: async (args) => {
@@ -691,11 +730,9 @@ ToolRegistry.register({
       console.log(pc.yellow(`\n[Sandbox] Executando comando em container Docker (${args.image})...`));
       
       const cwd = process.cwd();
-      // Replace double quotes to avoid breaking the bash -c string
       const safeCommand = args.command.replace(/"/g, '\\"');
-      
-      // We run docker with --rm to clean up, and mount current dir to /workspace
-      const dockerCommand = `docker run --rm -v "${cwd}:/workspace" -w /workspace ${args.image} bash -c "${safeCommand}"`;
+      const dockerImage = args.image ?? "node:20";
+      const dockerCommand = `docker run --rm -v "${cwd}:/workspace" -w /workspace ${dockerImage} bash -c "${safeCommand}"`;
       
       const { stdout, stderr } = await execAsync(dockerCommand);
       return { success: true, stdout, stderr };

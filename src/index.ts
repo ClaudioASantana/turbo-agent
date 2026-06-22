@@ -85,6 +85,24 @@ async function main() {
       agent.clearHistory();
       continue;
     }
+    
+    if (prompt.toLowerCase().startsWith("/rewind")) {
+      const parts = prompt.split(" ");
+      const steps = parts.length > 1 ? parseInt(parts[1]) : 1;
+      if (isNaN(steps) || steps <= 0) {
+        console.log(pc.red("Uso: /rewind <numero_de_passos>"));
+        continue;
+      }
+      
+      console.log(pc.yellow(`⏱️ Voltando no tempo ${steps} passo(s)...`));
+      const success = await agent.rewindState(steps);
+      if (success) {
+         console.log(pc.green("✅ Estado revertido com sucesso! O agente esqueceu os eventos recentes."));
+      } else {
+         console.log(pc.red("❌ Não foi possível reverter. Histórico insuficiente."));
+      }
+      continue;
+    }
 
     const result: any = await agent.runStep(prompt);
     

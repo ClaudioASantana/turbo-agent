@@ -70,6 +70,12 @@ export function extractToolCalls(response: string): { id: string, name: string, 
   try {
     const directObj = tryParse(cleanResponse);
     if (directObj && typeof directObj === 'object' && !Array.isArray(directObj)) {
+      // Formato exigido no prompt: { "tool": "nome", "args": {} }
+      if (directObj.tool && directObj.args) {
+         toolCalls.push({ id: fakeId, name: directObj.tool, args: directObj.args });
+         return toolCalls;
+      }
+      
       // Tenta inferir o nome a partir da primeira chave (ex: { "finish_task": { "finalAnswer": "..." } })
       const keys = Object.keys(directObj);
       if (keys.length === 1 && typeof directObj[keys[0]] === 'object') {
@@ -83,7 +89,13 @@ export function extractToolCalls(response: string): { id: string, name: string, 
   while ((match = markdownRegex.exec(cleanResponse)) !== null) {
     try {
       const parsed = tryParse(match[1]);
-      if (parsed && typeof parsed === 'object') {
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // Formato exigido no prompt: { "tool": "nome", "args": {} }
+        if (parsed.tool && parsed.args) {
+           toolCalls.push({ id: fakeId, name: parsed.tool, args: parsed.args });
+           return toolCalls;
+        }
+
         const keys = Object.keys(parsed);
         if (keys.length === 1 && typeof parsed[keys[0]] === 'object') {
            toolCalls.push({ id: fakeId, name: keys[0], args: parsed[keys[0]] });
@@ -91,6 +103,47 @@ export function extractToolCalls(response: string): { id: string, name: string, 
         }
       }
     } catch (err) { }
+  }
+
+  // Fallback agressivo: buscar chaves JSON brutas em qualquer lugar do texto
+  let braceCount = 0;
+  let startIndex = -1;
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < cleanResponse.length; i++) {
+      const char = cleanResponse[i];
+      if (escape) { escape = false; continue; }
+      if (char === '\\') { escape = true; continue; }
+      if (char === '"') { inString = !inString; continue; }
+      if (!inString) {
+          if (char === '{') {
+              if (braceCount === 0) startIndex = i;
+              braceCount++;
+          } else if (char === '}') {
+              braceCount--;
+              if (braceCount === 0 && startIndex !== -1) {
+                  const block = cleanResponse.substring(startIndex, i + 1);
+                  try {
+                      const parsed = tryParse(block);
+                      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                          if (parsed.tool && parsed.args) {
+                              toolCalls.push({ id: fakeId, name: parsed.tool, args: parsed.args });
+                              return toolCalls;
+                          }
+                          const keys = Object.keys(parsed);
+                          if (keys.length === 1 && typeof parsed[keys[0]] === 'object') {
+                              toolCalls.push({ id: fakeId, name: keys[0], args: parsed[keys[0]] });
+                              return toolCalls;
+                          }
+                      }
+                  } catch (e) {}
+                  startIndex = -1;
+              } else if (braceCount < 0) {
+                  braceCount = 0;
+              }
+          }
+      }
   }
 
   return toolCalls.length > 0 ? toolCalls : null;
