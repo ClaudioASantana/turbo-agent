@@ -4,14 +4,20 @@ import { grantPermission } from "./permissions";
 import path from "path";
 
 export async function promptUser(question: string): Promise<string> {
+  if (process.env.UI_MODE === "true") return "";
   return await input({ message: pc.cyan(pc.bold(question)) });
 }
 
 export async function confirmAction(message: string, defaultAnswer: boolean = false): Promise<boolean> {
+  if (process.env.UI_MODE === "true") return true;
   return await confirm({ message, default: defaultAnswer });
 }
 
 export async function requestToolPermission(toolName: string, args: any): Promise<boolean> {
+  if (process.env.UI_MODE === "true") {
+      console.log(pc.yellow(`[UI MODE] Auto-aprovando ferramenta perigosa: ${toolName}`));
+      return true;
+  }
   const choices = [
     { name: "Sim (Aprovar apenas esta vez)", value: "yes" },
     { name: "Não (Negar)", value: "no" },

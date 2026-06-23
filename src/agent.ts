@@ -39,10 +39,16 @@ const normalizeMessages = (msgs: BaseMessage[]) => {
        
        if (normalized.length > 0 && normalized[normalized.length - 1]._getType() === msg._getType()) {
            const prev = normalized[normalized.length - 1];
-           prev.content = prev.content.toString() + "\n\n" + msg.content.toString();
-       } else {
-           normalized.push(msg);
+           const prevHasTools = (prev as any).tool_calls && (prev as any).tool_calls.length > 0;
+           const currentHasTools = (msg as any).tool_calls && (msg as any).tool_calls.length > 0;
+           const isToolMsg = msg._getType() === "tool";
+           
+           if (!isToolMsg && !prevHasTools && !currentHasTools) {
+               prev.content = prev.content.toString() + "\n\n" + msg.content.toString();
+               continue;
+           }
        }
+       normalized.push(msg);
    }
    
    // Anthropic exige que a primeira mensagem não-sistema seja do usuário.
@@ -85,6 +91,7 @@ export class Agent {
   private graph: any;
   private checkpointer: SqliteSaver;
   private threadId: string;
+  private abortController: AbortController | null = null;
 
   constructor(historyFilePath: string = ".agent_history.json", maxIterations?: number, maxMessages?: number, isSubagent = false, persona = "generic") {
     const config = getConfig();
@@ -110,6 +117,15 @@ export class Agent {
   public loadHistory() { this.historyManager.loadHistory(buildSystemPrompt(this.persona)); }
   public saveHistory() { this.historyManager.saveHistory(); }
   public clearHistory() { this.historyManager.clearHistory(buildSystemPrompt(this.persona)); }
+
+  public async cancel() {
+      if (this.abortController) {
+          this.abortController.abort("Cancelled by user");
+          this.abortController = null;
+      }
+      agentEvents.emit("system", "\n🚫 Operação cancelada pelo usuário.\n");
+      agentEvents.emit("end");
+  }
 
   // Helpers para converter histórico legado para LangChain Messages
   private mapToLangChainMessages(messages: any[]): BaseMessage[] {
@@ -157,23 +173,43 @@ export class Agent {
         maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
         apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
         streamUsage: false,
+        maxRetries: 0,
+        streaming: true,
         configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
       });
 
       const tools = ToolRegistry.getSchemas();
       const chatWithTools = chat.bindTools(tools);
       
-      const sysMsg = new SystemMessage(`Você é o Explorador (Agentic RAG). Entenda o pedido do usuário e vasculhe os arquivos usando list_files ou read_file para encontrar onde a mudança deve ocorrer. Quando tiver os caminhos exatos, chame finish_task reportando os caminhos encontrados.
+      const { recall } = await import("./memoryVector");
+      let userPrompt = "";
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+         if (state.messages[i]._getType() === "human") {
+            const content = state.messages[i].content;
+            userPrompt = typeof content === 'string' ? content : (Array.isArray(content) ? content.map((c:any) => c.text || '').join('') : JSON.stringify(content));
+            break;
+         }
+      }
+      const pastMemories = userPrompt ? await recall(userPrompt, 3, 0.25) : [];
+      const memoryText = pastMemories.length > 0 ? `\nMEMÓRIAS PASSADAS RELEVANTES AO CONTEXTO:\n- ${pastMemories.join('\n- ')}\n` : "";
+
+      const sysMsg = new SystemMessage(`Você é o Explorador (Agentic RAG). Entenda o pedido do usuário e vasculhe os arquivos usando list_files ou read_file para encontrar onde a mudança deve ocorrer. Quando tiver os caminhos exatos, chame finish_task reportando os caminhos encontrados.${memoryText}
+Se a tarefa for complexa, use a ferramenta list_skills para ver se há diretrizes específicas do projeto, E use list_knowledge_items para ler regras e lições aprendidas de sessões anteriores antes de seguir.
 SE O USUÁRIO APENAS MANDAR UMA SAUDAÇÃO (ex: "olá"), responda amigavelmente em texto puro e NÃO chame ferramentas.
 SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notícias, cotações), VOCÊ ESTÁ ESTRITAMENTE PROIBIDO de dizer que não tem acesso. VOCÊ DEVE OBRIGATORIAMENTE chamar a ferramenta "web_search" ou "invoke_browser_subagent" para buscar a resposta no Google/DuckDuckGo antes de responder.`);
       const cleanMessages = normalizeMessages(state.messages.filter((m: any) => m._getType() !== "system"));
       console.log("PAYLOAD MESSAGES TO LLM:", JSON.stringify([sysMsg, ...cleanMessages]));
       const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
+      console.log("[DEBUG EXPLORER] RAW RESPONSE:", JSON.stringify(response));
       response.name = "explorer";
 
       if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
           const extracted = extractToolCalls(response.content.toString());
           if (extracted && extracted.length > 0) response.tool_calls = extracted;
+      }
+
+      if (!response.content && (!response.tool_calls || response.tool_calls.length === 0)) {
+          response.content = "⚠️ O proxy do LLM retornou uma resposta vazia ou corrompida. Por favor, tente novamente.";
       }
 
       return { messages: [response], sender: "explorerNode" };
@@ -186,6 +222,7 @@ SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notíci
         temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
         maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
         apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
+        maxRetries: 0,
         configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
       });
       
@@ -194,7 +231,8 @@ SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notíci
 
       const sysMsg = new SystemMessage(`Você é o Arquiteto de Software. 
 Contexto encontrado pelo explorador sobre o repositório: ${state.context || 'Nenhum'}.${coreRulesText}
-Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO use ferramentas. Formate explicitamente cada passo começando com "Passo 1:", "Passo 2:", etc.`);
+Se a tarefa for complexa, considere usar a ferramenta list_skills para ver se há regras ou diretrizes a seguir no projeto antes de planejar.
+Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO use ferramentas de escrita de código. Formate explicitamente cada passo começando com "Passo 1:", "Passo 2:", etc.`);
       
       const cleanMessages = state.messages.filter(m => m._getType() !== "system");
       console.log("INVOKING CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages])); const response = await chat.invoke([sysMsg, ...cleanMessages], config);
@@ -212,6 +250,8 @@ Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO us
           maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
           apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
         streamUsage: false,
+        maxRetries: 0,
+        streaming: true,
           configuration: {
             baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1"
           }
@@ -220,8 +260,11 @@ Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO us
         const tools = ToolRegistry.getSchemas();
         const chatWithTools = chat.bindTools(tools);
 
-        // O Coder recebe o plano do arquiteto como parte das messages
-        const sysMsg = new SystemMessage("Você é o Programador (Coder). Siga rigorosamente o plano que o Arquiteto acabou de traçar na última mensagem. Use as ferramentas necessárias. Se terminar, use a ferramenta finish_task.");
+        const sysMsg = new SystemMessage(`Você é o Programador (Coder) e Gerente de Sub-Agentes. Siga rigorosamente o plano que o Arquiteto acabou de traçar na última mensagem. Use as ferramentas necessárias.
+SE O PLANO EXIGIR ALTERAR VÁRIOS ARQUIVOS INDEPENDENTES: Você NÃO deve alterá-los sequencialmente. Você DEVE usar a ferramenta invoke_parallel_subagents passando um array com as instruções de cada arquivo, para que seus sub-agentes os modifiquem simultaneamente. NUNCA delegue o mesmo arquivo para mais de um sub-agente.
+Sempre que for fazer grandes refatorações você mesmo, use \`preview_file_changes\` primeiro e depois use \`request_user_approval\` para perguntar se o usuário concorda, antes de usar ferramentas destrutivas de escrita.
+Toda vez que você criar ou modificar uma função/feature, você OBRIGATORIAMENTE DEVE usar a ferramenta \`invoke_subagent\` para delegar a escrita dos testes unitários para um Sub-Agente especializado (diga a ele: 'Escreva os testes em Vitest para o arquivo X'). Não escreva os testes você mesmo!
+Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIGATORIAMENTE deve chamar a ferramenta \`create_pull_request\` para efetuar o commit do código validado e enviá-lo ao GitHub. A mensagem de commit DEVE seguir o padrão Semantic Commits (feat:, fix:, chore:, refactor:, docs:, test:, style:). Só depois chame finish_task.`);
         const cleanMessages = state.messages.filter(m => m._getType() !== "system");
         console.log("INVOKING CHATWITHTOOLS WITH:", JSON.stringify([sysMsg, ...cleanMessages])); console.log("PAYLOAD MESSAGES:", JSON.stringify([sysMsg, ...cleanMessages])); console.log("PAYLOAD MESSAGES TO LLM:", JSON.stringify([sysMsg, ...cleanMessages]));
       const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
@@ -233,6 +276,10 @@ Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO us
             if (extracted && extracted.length > 0) {
                response.tool_calls = extracted;
             }
+        }
+
+        if (!response.content && (!response.tool_calls || response.tool_calls.length === 0)) {
+            response.content = "⚠️ O proxy do LLM retornou uma resposta vazia ou corrompida no Coder. Por favor, verifique o provedor.";
         }
 
         return { messages: [response], sender: "coderNode" };
@@ -255,22 +302,36 @@ Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO us
         temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
         maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
         apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
+        maxRetries: 0,
         configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
       });
       
       const sysMsg = new SystemMessage(`Você é o Revisor de Qualidade (QA). O Coder declarou que finalizou a tarefa com a resposta: "${state.finalAnswer}". 
-Se a tarefa parece cumprida, responda estritamente a palavra "APROVADO". 
-Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Coder corrigir.`);
+Antes de aprovar, você OBRIGATORIAMENTE DEVE usar a ferramenta \`run_unit_tests\` para verificar se a suíte de testes do projeto passou.
+Se os testes passarem perfeitamente, responda estritamente a palavra "APROVADO". 
+Se algum teste falhar, aponte o defeito detalhadamente (copiando o erro do terminal) para o Coder corrigir.`);
       
+      const tools = ToolRegistry.getSchemas();
+      const chatWithTools = chat.bindTools(tools);
+
       const cleanMessages = state.messages.filter(m => m._getType() !== "system");
-      console.log("INVOKING CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages])); const response = await chat.invoke([sysMsg, ...cleanMessages], config);
+      console.log("INVOKING QA CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages]));
+      const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
       response.name = "qa";
 
-      if (response.content.toString().includes("APROVADO")) {
-         return { messages: [response] };
+      if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
+          const extracted = extractToolCalls(response.content.toString());
+          if (extracted && extracted.length > 0) {
+             response.tool_calls = extracted;
+          }
+      }
+
+      if (response.content && response.content.toString().includes("APROVADO")) {
+         return { messages: [response], sender: "qaNode" };
+      } else if (response.tool_calls && response.tool_calls.length > 0) {
+         return { messages: [response], sender: "qaNode" };
       } else {
-         // Reabre a tarefa para o Coder consertar
-         return { messages: [response], finalAnswer: null }; 
+         return { messages: [response], finalAnswer: null, sender: "qaNode" }; 
       }
     };
 
@@ -357,19 +418,6 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
     };
 
     const routeFromArchitect = (state: typeof AgentState.State) => {
-      const lastMessage = state.messages[state.messages.length - 1];
-      const content = lastMessage.content.toString();
-      
-      // Quebra o plano em passos paralelos se o LLM seguiu a formatação
-      const plans = content.split(/Passo \d+:/i).filter(p => p.trim().length > 10);
-      
-      if (plans.length > 1) {
-         // Paralelismo agressivo: Cria um nó Coder independente para cada Passo!
-         return plans.map(plan => new Send("coderNode", { 
-           messages: [new SystemMessage("TAREFA ISOLADA. Siga este plano: " + plan)], 
-           sender: "coderNode" 
-         }));
-      }
       return "coderNode";
     };
 
@@ -385,11 +433,14 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
     };
 
     const routeFromTools = (state: typeof AgentState.State) => {
-      // Retorna a execução para quem chamou a ferramenta (Explorer ou Coder)
+      if (state.sender === "qaNode") return "qaNode";
       return state.sender === "explorerNode" ? "explorerNode" : "coderNode";
     };
 
     const routeFromQA = (state: typeof AgentState.State) => {
+      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
+
       // Se o QA anulou o finalAnswer, significa que ele reprovou e quer que o Coder refaça.
       if (!state.finalAnswer) return "coderNode";
       return END;
@@ -414,7 +465,7 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
 
     return workflow.compile({ 
       checkpointer: this.checkpointer,
-      interruptBefore: ["coderNode"]
+      interruptBefore: this.isSubagent ? [] : ["coderNode"]
     });
   }
 
@@ -468,6 +519,18 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
        initialMessages = this.mapToLangChainMessages(this.historyManager.messages);
     }
     
+    // Slash Commands Interception
+    if (userPrompt) {
+        if (userPrompt.trim().startsWith("/goal ")) {
+            this.maxIterations = 100; // Unlock iteration limits for Goal Mode
+            userPrompt = userPrompt.replace(/^\/goal\s+/, "").trim() + "\n\n[SYSTEM: VOCÊ ESTÁ NO MODO /goal. Você NÃO DEVE PARAR de trabalhar até que toda a tarefa esteja concluída. Prossiga incansavelmente passo a passo.]";
+            agentEvents.emit("system", "\n🎯 Modo /goal ATIVADO. Limites de iteração removidos.\n");
+        } else if (userPrompt.trim().startsWith("/grill-me ")) {
+            userPrompt = userPrompt.replace(/^\/grill-me\s+/, "").trim() + "\n\n[SYSTEM: VOCÊ ESTÁ NO MODO /grill-me. NÃO programe nada ainda! Faça perguntas interativas e detalhadas sobre a arquitetura, regras de negócio e requisitos do usuário para entender completamente o pedido antes de iniciar o plano. Entreviste o usuário!]";
+            agentEvents.emit("system", "\n🔥 Modo /grill-me ATIVADO. O agente fará perguntas antes de programar.\n");
+        }
+    }
+
     if (userPrompt) {
       initialMessages.push(new HumanMessage(userPrompt));
     }
@@ -481,15 +544,20 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
       sender: "coderNode"
     } : null;
 
+    this.abortController = new AbortController();
+
     try {
        // Executa o grafo com persistência nativa (thread_id)
        const events = this.graph.streamEvents(currentState, { 
          version: "v2", 
          recursionLimit: this.maxIterations,
-         configurable: { thread_id: this.threadId }
+         configurable: { thread_id: this.threadId },
+         signal: this.abortController.signal
        });
 
-       let printedAgentHeader = false;
+       let printedAgentHeader: string | boolean = false;
+       const streamedTokensCount: Record<string, number> = {};
+       let emittedAnyToken = false;
 
        for await (const event of events) {
          if (event.event === "on_chat_model_stream") {
@@ -504,8 +572,35 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
                printedAgentHeader = nodeName;
             }
             if (chunk.content) {
-               process.stdout.write(pc.cyan(chunk.content));
-               agentEvents.emit("token", chunk.content);
+               const text = typeof chunk.content === 'string' ? chunk.content : (Array.isArray(chunk.content) ? chunk.content.map((c:any) => c.text || '').join('') : JSON.stringify(chunk.content));
+               if (text) {
+                   if (!this.isSubagent) {
+                       process.stdout.write(pc.cyan(text));
+                       agentEvents.emit("token", text);
+                   }
+                   emittedAnyToken = true;
+                   streamedTokensCount[event.run_id] = (streamedTokensCount[event.run_id] || 0) + 1;
+                }
+            }
+         } else if (event.event === "on_chat_model_end") {
+            const msg = event.data.output;
+            console.log("[DEBUG STREAM END] msg:", JSON.stringify(msg));
+            if (!streamedTokensCount[event.run_id] && msg && msg.content) {
+               const nodeName = msg.name || "agent";
+               if (!this.isSubagent && !isJson && printedAgentHeader !== nodeName) {
+                  const displayName = nodeName === "architect" ? "📐 Arquiteto" : (nodeName === "explorer" ? "🔎 Explorador" : "🤖 Coder");
+                  process.stdout.write(pc.green(`\n\n${displayName} Raciocinando...\n`));
+                  agentEvents.emit("system", `\n\n${displayName} Raciocinando...\n`);
+                  printedAgentHeader = nodeName;
+               }
+               const text = typeof msg.content === 'string' ? msg.content : (Array.isArray(msg.content) ? msg.content.map((c:any) => c.text || '').join('') : JSON.stringify(msg.content));
+               if (text) {
+                   if (!this.isSubagent) {
+                       process.stdout.write(pc.cyan(text));
+                       agentEvents.emit("token", text);
+                   }
+                   emittedAnyToken = true;
+               }
             }
          } else if (event.event === "on_tool_start") {
             if (!this.isSubagent && !isJson) {
@@ -533,6 +628,18 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
           return { status: 'paused' };
        }
        
+       // Fallback blindado: Se NENHUM token chegou na UI (por bug de stream do proxy), pegamos a resposta final à força
+       if (!emittedAnyToken && currentState && currentState.messages && currentState.messages.length > 0) {
+           const lastMsg = currentState.messages[currentState.messages.length - 1];
+           if ((lastMsg._getType() === "ai" || lastMsg.name === "explorer" || lastMsg.name === "coder") && lastMsg.content) {
+               const text = typeof lastMsg.content === 'string' ? lastMsg.content : (Array.isArray(lastMsg.content) ? lastMsg.content.map((c:any) => c.text || '').join('') : JSON.stringify(lastMsg.content));
+               if (text) {
+                   process.stdout.write(pc.cyan(text));
+                   agentEvents.emit("token", text);
+               }
+           }
+       }
+       
        agentEvents.emit("end");
        const result = currentState;
        await DatadogDispatcher.flush();
@@ -552,9 +659,21 @@ Se faltou algo ou a resposta for ruim, aponte o defeito detalhadamente para o Co
           return "Erro crítico: O agente falhou 3 vezes consecutivas e o Circuit Breaker foi ativado.";
        }
 
-       return result.finalAnswer || "Execução concluída sem resposta final definida.";
+       let finalMsg = result.finalAnswer;
+       if (!finalMsg && result.messages && result.messages.length > 0) {
+           const lastMsg = result.messages[result.messages.length - 1];
+           if (lastMsg._getType() === "ai" || lastMsg.name === "explorer" || lastMsg.name === "coder") {
+               finalMsg = typeof lastMsg.content === 'string' ? lastMsg.content : (Array.isArray(lastMsg.content) ? lastMsg.content.map((c:any) => c.text || '').join('') : JSON.stringify(lastMsg.content));
+           }
+       }
+
+       return finalMsg || "Execução concluída sem resposta final definida.";
 
     } catch (e: any) {
+       if (e.name === "AbortError" || (e.message && e.message.includes("Cancelled by user"))) {
+           Logger.warn("Execução cancelada pelo usuário.");
+           return "Operação cancelada.";
+       }
        Logger.error(`Erro crítico no LangGraph: ${e.message}`);
        agentEvents.emit("error", `Erro crítico na API do LLM: ${e.message}`);
        return `Error: ${e.message}`;

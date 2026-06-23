@@ -8,9 +8,10 @@ import { AgentTerminal } from "./terminal";
 import { confirmAction } from "./promptUser";
 import pc from "picocolors";
 import { Logger } from "./logger";
+import { agentEvents } from "./agent";
 const execPromise = promisify(exec);
 
-export const backgroundProcesses: Record<string, { process: ChildProcess, logs: string[] }> = {};
+export const backgroundProcesses: Record<string, { process: ChildProcess, logs: string[], command: string, status: string }> = {};
 
 // Helper to find a file recursively if the given path doesn't strictly exist
 function resolveFilePath(targetPath: string, rootDir: string = "."): string {
@@ -447,7 +448,7 @@ ToolRegistry.register({
     if (backgroundProcesses[args.id]) throw new Error(`Process '${args.id}' is already running.`);
     const options = args.cwd ? { cwd: path.resolve(args.cwd), shell: true } : { shell: true };
     const child = spawn(args.command, [], options);
-    backgroundProcesses[args.id] = { process: child, logs: [] };
+    backgroundProcesses[args.id] = { process: child, logs: [], command: args.command, status: "running" };
     const handleOutput = (data: any) => {
       const proc = backgroundProcesses[args.id];
       if (proc) {
@@ -458,7 +459,10 @@ ToolRegistry.register({
     child.stdout?.on('data', handleOutput);
     child.stderr?.on('data', handleOutput);
     child.on('close', (code) => {
-      if (backgroundProcesses[args.id]) backgroundProcesses[args.id].logs.push(`[Process exited with code ${code}]`);
+      if (backgroundProcesses[args.id]) {
+         backgroundProcesses[args.id].logs.push(`[Process exited with code ${code}]`);
+         backgroundProcesses[args.id].status = "exited";
+      }
     });
     return { success: true, message: `Process '${args.id}' started successfully.` };
   }
@@ -484,7 +488,7 @@ ToolRegistry.register({
     const proc = backgroundProcesses[args.id];
     if (!proc) throw new Error(`No running process found with id '${args.id}'.`);
     proc.process.kill();
-    delete backgroundProcesses[args.id];
+    proc.status = "killed";
     return { success: true, message: `Process '${args.id}' stopped.` };
   }
 });
@@ -657,7 +661,7 @@ ToolRegistry.register({
   description: "Creates a new Git branch, commits all modified files, and provides instructions/commands to open a Pull Request. Use this after fixing a bug or implementing a feature to finalize the GitOps cycle.",
   schema: z.object({
     branchName: z.string().describe("The name of the new branch to create (e.g., fix-login-security)"),
-    commitMessage: z.string().describe("The commit message explaining the fix"),
+    commitMessage: z.string().describe("The commit message explaining the fix. MUST start with feat:, fix:, chore:, docs:, refactor:, test:, style:, or build:"),
     prTitle: z.string().describe("The title of the Pull Request"),
     prBody: z.string().describe("The description body of the Pull Request")
   }),
@@ -666,25 +670,34 @@ ToolRegistry.register({
       const { execSync } = require('child_process');
       console.log(pc.magenta(`\n[GitOps] Iniciando ciclo de CI/CD para a branch '${args.branchName}'...`));
       
-      // 1. Criar branch
+      const semanticRegex = /^(feat|fix|chore|docs|refactor|test|style|build|ci|perf)(\([a-z0-9\-]+\))?:\s.+/i;
+      if (!semanticRegex.test(args.commitMessage)) {
+        return { success: false, error: "Validation Error: commitMessage MUST follow Conventional Commits (e.g., 'feat: added login', 'fix: correct typo'). Please rewrite your commit message." };
+      }
+
       execSync(`git checkout -b ${args.branchName}`);
       console.log(pc.green(`✔ Branch '${args.branchName}' criada com sucesso.`));
 
-      // 2. Add files
       execSync(`git add .`);
       
-      // 3. Commit
       execSync(`git commit -m "${args.commitMessage}"`);
       console.log(pc.green(`✔ Commit realizado: "${args.commitMessage}"`));
 
+      console.log(pc.cyan(`[GitOps] Realizando push para origin/${args.branchName}...`));
+      const pushOutput = execSync(`git push -u origin ${args.branchName} 2>&1`, { encoding: 'utf8' });
+      console.log(pc.green(`✔ Push realizado com sucesso.`));
+
+      let prUrl = "";
+      const urlMatch = pushOutput.match(/https:\/\/(?:github\.com|gitlab\.com)[^\s]*/);
+      if (urlMatch) {
+          prUrl = urlMatch[0];
+      }
+
       const finalReport = `
-GitOps concluído localmente com sucesso!
+GitOps concluído com sucesso e enviado para o repositório remoto!
 - Branch: ${args.branchName}
 - Commit: ${args.commitMessage}
-
-Para enviar este código e criar o Pull Request remotamente, o desenvolvedor deve rodar:
-1) git push -u origin ${args.branchName}
-2) gh pr create --title "${args.prTitle}" --body "${args.prBody}"
+${prUrl ? `\n[LINK PARA CRIAR O PULL REQUEST]: ${prUrl}\nO desenvolvedor pode clicar neste link para abrir o PR no navegador.` : `\nPara criar o PR remotamente, rode: gh pr create --title "${args.prTitle}"`}
 `;
       return { success: true, report: finalReport };
     } catch (e: any) {
@@ -709,7 +722,74 @@ ToolRegistry.register({
     const filePath = path.join(artifactDir, `${safeTitle}.md`);
     fs.writeFileSync(filePath, args.content, "utf-8");
     console.log(pc.green(`\n📝 Artefato criado: ${filePath}`));
+    agentEvents.emit("open_artifact", filePath);
     return { success: true, message: `Artifact saved to ${filePath}` };
+  }
+});
+
+ToolRegistry.register({
+  name: "manage_tasks",
+  description: "Creates or updates a task checklist artifact (task.md). Use this to keep track of progress. Content should be a markdown checklist like: - [ ] Task 1. Then you can update it to - [x] Task 1.",
+  schema: z.object({
+    content: z.string().describe("The full markdown content of the task list.")
+  }),
+  execute: (args) => {
+    const artifactDir = path.resolve(".agent_artifacts");
+    if (!fs.existsSync(artifactDir)) {
+      fs.mkdirSync(artifactDir, { recursive: true });
+    }
+    const filePath = path.join(artifactDir, `task.md`);
+    fs.writeFileSync(filePath, args.content, "utf-8");
+    console.log(pc.green(`\n✅ Lista de tarefas atualizada: ${filePath}`));
+    agentEvents.emit("open_artifact", filePath);
+    return { success: true, message: `Task list saved to ${filePath}` };
+  }
+});
+
+ToolRegistry.register({
+  name: "list_skills",
+  description: "Lists all available dynamic skills and guidelines in the skills/ directory. Use this to find project-specific rules before writing code.",
+  schema: z.object({}),
+  execute: () => {
+    const skillsDir = path.resolve("skills");
+    if (!fs.existsSync(skillsDir)) return { success: true, skills: "No skills found." };
+    const files = fs.readdirSync(skillsDir).filter(f => f.endsWith(".md"));
+    if (files.length === 0) return { success: true, skills: "No skills found." };
+    
+    const skillsList = files.map(f => {
+       const content = fs.readFileSync(path.join(skillsDir, f), "utf-8");
+       const firstLine = content.split('\n')[0].replace('#', '').trim();
+       return `- ${f}: ${firstLine}`;
+    }).join('\n');
+    
+    return { success: true, message: `Available skills:\n${skillsList}\n\nUse read_file to read the content of a relevant skill.` };
+  }
+});
+
+ToolRegistry.register({
+  name: "preview_file_changes",
+  description: "Proposes changes to a file and opens a native Diff viewer in the user's IDE. Use this BEFORE applying large or risky changes so the user can review them. After calling this, you should typically call request_user_approval.",
+  schema: z.object({
+    filePath: z.string().describe("Absolute path to the original file"),
+    proposedContent: z.string().describe("The new content to replace the original with")
+  }),
+  execute: (args) => {
+    const originalPath = resolveFilePath(args.filePath);
+    if (!fs.existsSync(originalPath)) throw new Error(`File not found: ${args.filePath}`);
+    
+    const artifactDir = path.resolve(".agent_artifacts");
+    if (!fs.existsSync(artifactDir)) {
+      fs.mkdirSync(artifactDir, { recursive: true });
+    }
+    const fileName = path.basename(originalPath);
+    const proposedPath = path.join(artifactDir, `preview_${fileName}`);
+    
+    fs.writeFileSync(proposedPath, args.proposedContent, "utf-8");
+    console.log(pc.yellow(`\n🔍 Abrindo preview de diff para: ${fileName}`));
+    
+    agentEvents.emit("open_diff", { originalPath, proposedPath });
+    
+    return { success: true, message: `Diff preview opened for ${originalPath} vs ${proposedPath}. Wait for user feedback or call request_user_approval.` };
   }
 });
 
@@ -755,6 +835,280 @@ ToolRegistry.register({
       return { success: true, message: "Saved to long-term memory." };
     } catch (e: any) {
       return { success: false, error: `Failed to memorize: ${e.message}` };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "save_knowledge_item",
+  description: "Saves a Markdown file containing important learned lessons, rules, or architectural decisions about this repository. Use this to permanently store knowledge that will be useful in future sessions.",
+  schema: z.object({
+    topicName: z.string().describe("A short, dash-separated filename for the topic (e.g. 'auth-rules')"),
+    content: z.string().describe("The markdown content of the knowledge item")
+  }),
+  execute: (args) => {
+    const knowledgeDir = path.resolve(".agent_artifacts", "knowledge");
+    if (!fs.existsSync(knowledgeDir)) {
+      fs.mkdirSync(knowledgeDir, { recursive: true });
+    }
+    const safeName = args.topicName.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
+    const filePath = path.join(knowledgeDir, `${safeName}.md`);
+    fs.writeFileSync(filePath, args.content, "utf-8");
+    return { success: true, message: `Knowledge item saved to ${filePath}` };
+  }
+});
+
+ToolRegistry.register({
+  name: "list_knowledge_items",
+  description: "Lists all permanently saved knowledge items in the repository. Use this to discover context about the project's architecture, rules, or past bugs.",
+  schema: z.object({}),
+  execute: () => {
+    const knowledgeDir = path.resolve(".agent_artifacts", "knowledge");
+    if (!fs.existsSync(knowledgeDir)) {
+      return { success: true, message: "No knowledge items found.", files: [] };
+    }
+    const files = fs.readdirSync(knowledgeDir).filter(f => f.endsWith(".md"));
+    return { success: true, files: files.map(f => path.join(knowledgeDir, f)) };
+  }
+});
+
+ToolRegistry.register({
+  name: "invoke_parallel_subagents",
+  description: "Delega um array de tarefas para N sub-agentes rodarem em PARALELO simultaneamente. Use isso APENAS quando as tarefas alterarem arquivos DIFERENTES.",
+  schema: z.object({
+    tasks: z.array(z.string()).describe("Lista de prompts com instruções e caminhos absolutos de arquivos para cada sub-agente.")
+  }),
+  execute: async (args) => {
+    const { tasks } = args;
+    if (!tasks || tasks.length === 0) return { success: false, error: "Nenhuma tarefa." };
+    if (tasks.length > 5) return { success: false, error: "Máximo 5 sub-agentes." };
+
+    try {
+      const { ChatOpenAI } = await import("@langchain/openai");
+      const { SystemMessage, HumanMessage, ToolMessage } = await import("@langchain/core/messages");
+
+      const runSubagent = async (task: string, index: number) => {
+        agentEvents.emit("system", `\n🚀 Sub-Agente [${index+1}] Iniciado: "${task.substring(0,50)}..."\n`);
+        const chat = new ChatOpenAI({
+          modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
+          temperature: 0.1,
+          maxTokens: 4096,
+          apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
+          configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
+        });
+
+        const schemas = ToolRegistry.getSchemas();
+        const chatWithTools = chat.bindTools(schemas);
+        const messages: any[] = [
+           new SystemMessage(`Você é um Sub-Agente Especialista. Execute a tarefa O MAIS RÁPIDO POSSÍVEL. Quando terminar, chame finish_task.`),
+           new HumanMessage(task)
+        ];
+
+        let iter = 0;
+        while (iter < 8) {
+           iter++;
+           const response: any = await chatWithTools.invoke(messages);
+           messages.push(response);
+           if (!response.tool_calls || response.tool_calls.length === 0) break;
+
+           for (const call of response.tool_calls) {
+              const toolName = call.name;
+              if (toolName === "finish_task") return `Sub-Agente [${index+1}] Sucesso.`;
+              if (toolName === "invoke_parallel_subagents") {
+                 messages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: "Proibido." }));
+                 continue;
+              }
+
+              let toolResult;
+              try {
+                toolResult = await ToolRegistry.execute(toolName, call.args);
+              } catch (e: any) {
+                toolResult = { success: false, error: e.message };
+              }
+              messages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: JSON.stringify(toolResult).substring(0,1000) }));
+           }
+        }
+        return `Sub-Agente [${index+1}] parou.`;
+      };
+
+      const results = await Promise.all(tasks.map((task, i) => runSubagent(task, i)));
+      return { success: true, results };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "query_sqlite",
+  description: "Executes a READ-ONLY SQL query against a local SQLite database file (.db or .sqlite). Useful to audit or extract data directly.",
+  schema: z.object({
+    dbPath: z.string().describe("The absolute or relative path to the SQLite database file"),
+    query: z.string().describe("The SQL query to execute (e.g. SELECT * FROM users, PRAGMA table_info(logs))")
+  }),
+  execute: (args) => {
+    try {
+      // Lazy load to avoid slowing down startup
+      const Database = require('better-sqlite3');
+      
+      const dbPath = path.resolve(args.dbPath);
+      if (!fs.existsSync(dbPath)) {
+        return { success: false, error: `Database file not found at ${dbPath}` };
+      }
+
+      // Open in Read-Only mode for safety
+      const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      
+      try {
+        const stmt = db.prepare(args.query);
+        let rows = [];
+        // better-sqlite3 throws if you try to run .all() on statements that don't return data
+        if (stmt.reader) {
+           rows = stmt.all();
+        } else {
+           stmt.run(); // Should fail if it's an UPDATE/INSERT and db is readonly
+        }
+        db.close();
+        
+        return { success: true, result: rows };
+      } catch (err: any) {
+        db.close();
+        return { success: false, error: `Query failed: ${err.message}` };
+      }
+    } catch (e: any) {
+      return { success: false, error: `SQLite connection failed: ${e.message}` };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "run_unit_tests",
+  description: "Executa a suíte de testes unitários (ex: vitest run) e retorna o resultado. Use para verificar se o código não quebrou nada ou se o novo teste escrito passou.",
+  schema: z.object({
+    testFile: z.string().optional().describe("Caminho do arquivo de teste específico para rodar. Deixe em branco para rodar todos os testes.")
+  }),
+  execute: (args) => {
+    try {
+      const { execSync } = require('child_process');
+      const command = args.testFile ? `npx vitest run ${args.testFile}` : `npx vitest run`;
+      
+      console.log(require('picocolors').cyan(`\n[QA] Executando testes: ${command}`));
+      const output = execSync(command, { encoding: 'utf8', stdio: 'pipe' });
+      
+      return { success: true, result: output };
+    } catch (e: any) {
+      // execSync throws se o comando falhar (exit code != 0), o stdout/stderr vem no erro
+      const errorLog = e.stdout ? e.stdout.toString() : e.message;
+      return { success: false, error: `Tests failed!\n${errorLog}` };
+    }
+  }
+});
+
+// --- FASE 17: OS Integration Tools ---
+
+ToolRegistry.register({
+  name: "send_notification",
+  description: "Envia uma notificação nativa para a área de trabalho do usuário (Desktop). Use para avisar que uma tarefa demorada terminou ou para enviar alertas.",
+  schema: z.object({
+    title: z.string().describe("Título da notificação"),
+    message: z.string().describe("Corpo da mensagem da notificação")
+  }),
+  execute: async (args) => {
+    try {
+      const notifier = require('node-notifier');
+      notifier.notify({
+        title: args.title || 'Turbo Agent',
+        message: args.message,
+        sound: true,
+        wait: false
+      });
+      return { success: true, message: "Notificação enviada." };
+    } catch (e: any) {
+      return { success: false, error: `Falha ao enviar notificação: ${e.message}` };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "clipboard_manager",
+  description: "Lê ou escreve texto na área de transferência (Clipboard) do sistema operacional do usuário. Útil se o usuário disser 'corrige o código que copiei'.",
+  schema: z.object({
+    action: z.enum(["read", "write"]).describe("Ação: read (ler) ou write (escrever)"),
+    text: z.string().optional().describe("Texto para escrever no clipboard (apenas para write)")
+  }),
+  execute: async (args) => {
+    try {
+      const clipboardy = await import('clipboardy');
+      if (args.action === "read") {
+        const text = clipboardy.default.readSync();
+        return { success: true, text };
+      } else {
+        if (!args.text) return { success: false, error: "Text is required for write action" };
+        clipboardy.default.writeSync(args.text);
+        return { success: true, message: "Texto copiado para a área de transferência." };
+      }
+    } catch (e: any) {
+      return { success: false, error: `Falha no clipboard: ${e.message}. Note que em Linux remoto (SSH/WSL) pode não funcionar.` };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "open_browser",
+  description: "Abre o navegador padrão do sistema operacional em uma URL específica ou abre um arquivo local no navegador.",
+  schema: z.object({
+    url: z.string().describe("A URL ou caminho do arquivo para abrir")
+  }),
+  execute: async (args) => {
+    try {
+      const open = require('open');
+      await open(args.url);
+      return { success: true, message: `Navegador aberto em: ${args.url}` };
+    } catch (e: any) {
+      return { success: false, error: `Falha ao abrir navegador: ${e.message}` };
+    }
+  }
+});
+
+ToolRegistry.register({
+  name: "system_stats",
+  description: "Retorna estatísticas do Hardware local: Uso de CPU, Memória Livre/Total, e Disco. Útil para diagnósticos de gargalos.",
+  schema: z.object({}),
+  execute: async () => {
+    try {
+      const si = require('systeminformation');
+      const cpu = await si.currentLoad();
+      const mem = await si.mem();
+      
+      const stats = {
+        cpuLoadPercent: cpu.currentLoad.toFixed(2) + "%",
+        memoryTotalGB: (mem.total / 1024 / 1024 / 1024).toFixed(2),
+        memoryUsedGB: (mem.used / 1024 / 1024 / 1024).toFixed(2),
+        memoryFreeGB: (mem.free / 1024 / 1024 / 1024).toFixed(2)
+      };
+      
+      return { success: true, stats };
+    } catch (e: any) {
+      return { success: false, error: `Falha ao obter stats do sistema: ${e.message}` };
+    }
+  }
+});
+
+// --- FASE 18: Memória de Longo Prazo ---
+
+ToolRegistry.register({
+  name: "add_core_rule",
+  description: "Adiciona uma regra inquebrável à memória core permanente do agente (ex: padrões de código, uso de bibliotecas, tom de voz). Essa regra será injetada no System Prompt de todas as execuções futuras. Use isso para regras críticas de arquitetura.",
+  schema: z.object({
+    rule: z.string().describe("A regra arquitetural ou de estilo a ser obedecida permanentemente.")
+  }),
+  execute: async (args) => {
+    try {
+      const { CoreMemory } = await import("./coreMemory");
+      CoreMemory.addRule(args.rule);
+      return { success: true, message: "Regra adicionada à Core Memory com sucesso." };
+    } catch (e: any) {
+      return { success: false, error: `Falha ao adicionar Core Rule: ${e.message}` };
     }
   }
 });

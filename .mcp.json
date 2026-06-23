@@ -1,8 +1,13 @@
 {
   "mcpServers": {
-    "test-server": {
+    "sqlite": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-everything"]
+      "args": [
+        "-y",
+        "mcp-sqlite-server",
+        "--db",
+        ".agent_audit.db"
+      ]
     }
   }
 }

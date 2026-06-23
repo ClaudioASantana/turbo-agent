@@ -12,41 +12,9 @@ async function main() {
   console.log(pc.bold(pc.cyan("🤖 Turbo Agent Inicializado (v2)")));
   console.log(pc.magenta("=========================================\n"));
   
-  const modelOption = await select({
-    message: 'Selecione o modelo LLM a ser utilizado:',
-    choices: [
-      {
-        name: '🤖 Usar configurações do .env (Claude Proxy / Custom)',
-        value: 'env',
-        description: 'Usa a URL, modelo e chave definidos no arquivo .env.',
-      },
-      {
-        name: 'Qwen 3.6 35B TurboQuant',
-        value: 'omniagent',
-        description: 'Modelo de uso geral, otimizado para velocidade.',
-      },
-      {
-        name: 'Qwen 2.5 Coder 14B',
-        value: 'qwen2.5-coder:14b',
-        description: 'Modelo excelente para programação e tarefas rápidas.',
-      },
-      {
-        name: 'QwQ 32B (Raciocínio Avançado)',
-        value: 'qwq',
-        description: 'Modelo da família Qwen focado em raciocínio complexo.',
-      },
-    ],
-  });
-  
-  if (modelOption !== 'env') {
-    process.env.LLM_MODEL = modelOption;
-    // Força o IP do WSL local apenas se escolheu um modelo do Ollama/LMStudio do menu
-    initLLM("http://172.24.160.1:18080/v1", "llama.cpp");
-    console.log(`-> ✅ Selecionado: ${modelOption}\n`);
-  } else {
-    initLLM(); // Vai ler tudo do .env
-    console.log(`-> ✅ Selecionado: Configuração do .env (Modelo: ${process.env.LLM_MODEL})\n`);
-  }
+  // Usa a configuração do .env diretamente
+  initLLM(); 
+  console.log(`-> ✅ Selecionado: Configuração do .env (Modelo: ${process.env.LLM_MODEL || 'Claude / Custom'})\n`);
 
   console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file, etc.");
   console.log("Comandos de chat iterativo ativados.");

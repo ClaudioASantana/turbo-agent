@@ -194,6 +194,37 @@ export const TOOL_PERMISSIONS: ToolPermission[] = [
     description: "Creates a Git branch and opens a PR",
     requiresApproval: true,
   },
+  // ── OS Integration ─────────────────────────────────────────────────────────
+  {
+    tool: "send_notification",
+    level: "execute",
+    description: "Sends a native desktop notification",
+    requiresApproval: false,
+  },
+  {
+    tool: "clipboard_manager",
+    level: "execute",
+    description: "Reads or writes to the clipboard",
+    requiresApproval: true,
+  },
+  {
+    tool: "open_browser",
+    level: "execute",
+    description: "Opens a URL in the native browser",
+    requiresApproval: false,
+  },
+  {
+    tool: "system_stats",
+    level: "read",
+    description: "Returns system hardware stats",
+    requiresApproval: false,
+  },
+  {
+    tool: "add_core_rule",
+    level: "write",
+    description: "Adiciona uma regra ao core memory",
+    requiresApproval: false,
+  },
 ];
 
 /** Lookup map for O(1) access */
