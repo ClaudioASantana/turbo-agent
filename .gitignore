@@ -3,3 +3,10 @@ node_modules
 dist
 .env
 *.log
+tests-scratch/
+*.db
+*.db-shm
+*.db-wal
+output*.txt
+test_*.ts
+test_*.js

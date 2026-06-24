@@ -1,0 +1,2475 @@
+diff --git a/package-lock.json b/package-lock.json
+index be68f3a..04c3062 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -10,10 +10,12 @@
+       "license": "ISC",
+       "dependencies": {
+         "@inquirer/prompts": "^8.4.2",
++        "@modelcontextprotocol/sdk": "^1.29.0",
+         "cheerio": "^1.2.0",
+         "dotenv": "^17.4.2",
+         "openai": "^6.34.0",
+-        "zod": "^4.3.6"
++        "zod": "^4.3.6",
++        "zod-to-json-schema": "^3.25.2"
+       },
+       "devDependencies": {
+         "@types/node": "^25.6.0",
+@@ -463,6 +465,18 @@
+         "node": ">=18"
+       }
+     },
++    "node_modules/@hono/node-server": {
++      "version": "1.19.14",
++      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-1.19.14.tgz",
++      "integrity": "sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18.14.1"
++      },
++      "peerDependencies": {
++        "hono": "^4"
++      }
++    },
+     "node_modules/@inquirer/ansi": {
+       "version": "2.0.5",
+       "resolved": "https://registry.npmjs.org/@inquirer/ansi/-/ansi-2.0.5.tgz",
+@@ -807,6 +821,46 @@
+         }
+       }
+     },
++    "node_modules/@modelcontextprotocol/sdk": {
++      "version": "1.29.0",
++      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.29.0.tgz",
++      "integrity": "sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==",
++      "license": "MIT",
++      "dependencies": {
++        "@hono/node-server": "^1.19.9",
++        "ajv": "^8.17.1",
++        "ajv-formats": "^3.0.1",
++        "content-type": "^1.0.5",
++        "cors": "^2.8.5",
++        "cross-spawn": "^7.0.5",
++        "eventsource": "^3.0.2",
++        "eventsource-parser": "^3.0.0",
++        "express": "^5.2.1",
++        "express-rate-limit": "^8.2.1",
++        "hono": "^4.11.4",
++        "jose": "^6.1.3",
++        "json-schema-typed": "^8.0.2",
++        "pkce-challenge": "^5.0.0",
++        "raw-body": "^3.0.0",
++        "zod": "^3.25 || ^4.0",
++        "zod-to-json-schema": "^3.25.1"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "peerDependencies": {
++        "@cfworker/json-schema": "^4.1.1",
++        "zod": "^3.25 || ^4.0"
++      },
++      "peerDependenciesMeta": {
++        "@cfworker/json-schema": {
++          "optional": true
++        },
++        "zod": {
++          "optional": false
++        }
++      }
++    },
+     "node_modules/@types/node": {
+       "version": "25.6.0",
+       "resolved": "https://registry.npmjs.org/@types/node/-/node-25.6.0.tgz",
+@@ -817,12 +871,149 @@
+         "undici-types": "~7.19.0"
+       }
+     },
++    "node_modules/accepts": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/accepts/-/accepts-2.0.0.tgz",
++      "integrity": "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==",
++      "license": "MIT",
++      "dependencies": {
++        "mime-types": "^3.0.0",
++        "negotiator": "^1.0.0"
++      },
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/ajv": {
++      "version": "8.20.0",
++      "resolved": "https://registry.npmjs.org/ajv/-/ajv-8.20.0.tgz",
++      "integrity": "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==",
++      "license": "MIT",
++      "dependencies": {
++        "fast-deep-equal": "^3.1.3",
++        "fast-uri": "^3.0.1",
++        "json-schema-traverse": "^1.0.0",
++        "require-from-string": "^2.0.2"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/epoberezkin"
++      }
++    },
++    "node_modules/ajv-formats": {
++      "version": "3.0.1",
++      "resolved": "https://registry.npmjs.org/ajv-formats/-/ajv-formats-3.0.1.tgz",
++      "integrity": "sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==",
++      "license": "MIT",
++      "dependencies": {
++        "ajv": "^8.0.0"
++      },
++      "peerDependencies": {
++        "ajv": "^8.0.0"
++      },
++      "peerDependenciesMeta": {
++        "ajv": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/body-parser": {
++      "version": "2.3.0",
++      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-2.3.0.tgz",
++      "integrity": "sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==",
++      "license": "MIT",
++      "dependencies": {
++        "bytes": "^3.1.2",
++        "content-type": "^2.0.0",
++        "debug": "^4.4.3",
++        "http-errors": "^2.0.1",
++        "iconv-lite": "^0.7.2",
++        "on-finished": "^2.4.1",
++        "qs": "^6.15.2",
++        "raw-body": "^3.0.2",
++        "type-is": "^2.1.0"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/body-parser/node_modules/content-type": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/content-type/-/content-type-2.0.0.tgz",
++      "integrity": "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/body-parser/node_modules/iconv-lite": {
++      "version": "0.7.2",
++      "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.7.2.tgz",
++      "integrity": "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==",
++      "license": "MIT",
++      "dependencies": {
++        "safer-buffer": ">= 2.1.2 < 3.0.0"
++      },
++      "engines": {
++        "node": ">=0.10.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
+     "node_modules/boolbase": {
+       "version": "1.0.0",
+       "resolved": "https://registry.npmjs.org/boolbase/-/boolbase-1.0.0.tgz",
+       "integrity": "sha512-JZOSA7Mo9sNGB8+UjSgzdLtokWAky1zbztM3WRLCbZ70/3cTANmQmOdR7y2g+J0e2WXywy1yS468tY+IruqEww==",
+       "license": "ISC"
+     },
++    "node_modules/bytes": {
++      "version": "3.1.2",
++      "resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
++      "integrity": "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/call-bind-apply-helpers": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
++      "integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0",
++        "function-bind": "^1.1.2"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/call-bound": {
++      "version": "1.0.4",
++      "resolved": "https://registry.npmjs.org/call-bound/-/call-bound-1.0.4.tgz",
++      "integrity": "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bind-apply-helpers": "^1.0.2",
++        "get-intrinsic": "^1.3.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
+     "node_modules/chardet": {
+       "version": "2.1.1",
+       "resolved": "https://registry.npmjs.org/chardet/-/chardet-2.1.1.tgz",
+@@ -880,6 +1071,77 @@
+         "node": ">= 12"
+       }
+     },
++    "node_modules/content-disposition": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/content-disposition/-/content-disposition-1.1.0.tgz",
++      "integrity": "sha512-5jRCH9Z/+DRP7rkvY83B+yGIGX96OYdJmzngqnw2SBSxqCFPd0w2km3s5iawpGX8krnwSGmF0FW5Nhr0Hfai3g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/content-type": {
++      "version": "1.0.5",
++      "resolved": "https://registry.npmjs.org/content-type/-/content-type-1.0.5.tgz",
++      "integrity": "sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/cookie": {
++      "version": "0.7.2",
++      "resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz",
++      "integrity": "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/cookie-signature": {
++      "version": "1.2.2",
++      "resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.2.2.tgz",
++      "integrity": "sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=6.6.0"
++      }
++    },
++    "node_modules/cors": {
++      "version": "2.8.6",
++      "resolved": "https://registry.npmjs.org/cors/-/cors-2.8.6.tgz",
++      "integrity": "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==",
++      "license": "MIT",
++      "dependencies": {
++        "object-assign": "^4",
++        "vary": "^1"
++      },
++      "engines": {
++        "node": ">= 0.10"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/cross-spawn": {
++      "version": "7.0.6",
++      "resolved": "https://registry.npmjs.org/cross-spawn/-/cross-spawn-7.0.6.tgz",
++      "integrity": "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==",
++      "license": "MIT",
++      "dependencies": {
++        "path-key": "^3.1.0",
++        "shebang-command": "^2.0.0",
++        "which": "^2.0.1"
++      },
++      "engines": {
++        "node": ">= 8"
++      }
++    },
+     "node_modules/css-select": {
+       "version": "5.2.2",
+       "resolved": "https://registry.npmjs.org/css-select/-/css-select-5.2.2.tgz",
+@@ -908,6 +1170,32 @@
+         "url": "https://github.com/sponsors/fb55"
+       }
+     },
++    "node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "license": "MIT",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/depd": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
++      "integrity": "sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
+     "node_modules/dom-serializer": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/dom-serializer/-/dom-serializer-2.0.0.tgz",
+@@ -975,6 +1263,35 @@
+         "url": "https://dotenvx.com"
+       }
+     },
++    "node_modules/dunder-proto": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
++      "integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bind-apply-helpers": "^1.0.1",
++        "es-errors": "^1.3.0",
++        "gopd": "^1.2.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/ee-first": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
++      "integrity": "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==",
++      "license": "MIT"
++    },
++    "node_modules/encodeurl": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
++      "integrity": "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
+     "node_modules/encoding-sniffer": {
+       "version": "0.2.1",
+       "resolved": "https://registry.npmjs.org/encoding-sniffer/-/encoding-sniffer-0.2.1.tgz",
+@@ -1000,6 +1317,36 @@
+         "url": "https://github.com/fb55/entities?sponsor=1"
+       }
+     },
++    "node_modules/es-define-property": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
++      "integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/es-errors": {
++      "version": "1.3.0",
++      "resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
++      "integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/es-object-atoms": {
++      "version": "1.1.2",
++      "resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.2.tgz",
++      "integrity": "sha512-HWcBoN6NileqtSydK2FqHbS/LoDd2pqrnQHLyJzBj4kOp/ky2MWMN694xOfkK8/SnUsW2DH7EfyVlydKCsm1Zw==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
+     "node_modules/esbuild": {
+       "version": "0.27.7",
+       "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.27.7.tgz",
+@@ -1042,6 +1389,109 @@
+         "@esbuild/win32-x64": "0.27.7"
+       }
+     },
++    "node_modules/escape-html": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
++      "integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==",
++      "license": "MIT"
++    },
++    "node_modules/etag": {
++      "version": "1.8.1",
++      "resolved": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
++      "integrity": "sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/eventsource": {
++      "version": "3.0.7",
++      "resolved": "https://registry.npmjs.org/eventsource/-/eventsource-3.0.7.tgz",
++      "integrity": "sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==",
++      "license": "MIT",
++      "dependencies": {
++        "eventsource-parser": "^3.0.1"
++      },
++      "engines": {
++        "node": ">=18.0.0"
++      }
++    },
++    "node_modules/eventsource-parser": {
++      "version": "3.1.0",
++      "resolved": "https://registry.npmjs.org/eventsource-parser/-/eventsource-parser-3.1.0.tgz",
++      "integrity": "sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18.0.0"
++      }
++    },
++    "node_modules/express": {
++      "version": "5.2.1",
++      "resolved": "https://registry.npmjs.org/express/-/express-5.2.1.tgz",
++      "integrity": "sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==",
++      "license": "MIT",
++      "dependencies": {
++        "accepts": "^2.0.0",
++        "body-parser": "^2.2.1",
++        "content-disposition": "^1.0.0",
++        "content-type": "^1.0.5",
++        "cookie": "^0.7.1",
++        "cookie-signature": "^1.2.1",
++        "debug": "^4.4.0",
++        "depd": "^2.0.0",
++        "encodeurl": "^2.0.0",
++        "escape-html": "^1.0.3",
++        "etag": "^1.8.1",
++        "finalhandler": "^2.1.0",
++        "fresh": "^2.0.0",
++        "http-errors": "^2.0.0",
++        "merge-descriptors": "^2.0.0",
++        "mime-types": "^3.0.0",
++        "on-finished": "^2.4.1",
++        "once": "^1.4.0",
++        "parseurl": "^1.3.3",
++        "proxy-addr": "^2.0.7",
++        "qs": "^6.14.0",
++        "range-parser": "^1.2.1",
++        "router": "^2.2.0",
++        "send": "^1.1.0",
++        "serve-static": "^2.2.0",
++        "statuses": "^2.0.1",
++        "type-is": "^2.0.1",
++        "vary": "^1.1.2"
++      },
++      "engines": {
++        "node": ">= 18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/express-rate-limit": {
++      "version": "8.5.2",
++      "resolved": "https://registry.npmjs.org/express-rate-limit/-/express-rate-limit-8.5.2.tgz",
++      "integrity": "sha512-5Kb34ipNX694DH48vN9irak1Qx30nb0PLYHXfJgw4YEjiC3ZEmZJhwOp+VfiCYwFzvFTdB9QkArYS5kXa2cx2A==",
++      "license": "MIT",
++      "dependencies": {
++        "ip-address": "^10.2.0"
++      },
++      "engines": {
++        "node": ">= 16"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/express-rate-limit"
++      },
++      "peerDependencies": {
++        "express": ">= 4.11"
++      }
++    },
++    "node_modules/fast-deep-equal": {
++      "version": "3.1.3",
++      "resolved": "https://registry.npmjs.org/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz",
++      "integrity": "sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==",
++      "license": "MIT"
++    },
+     "node_modules/fast-string-truncated-width": {
+       "version": "3.0.3",
+       "resolved": "https://registry.npmjs.org/fast-string-truncated-width/-/fast-string-truncated-width-3.0.3.tgz",
+@@ -1057,6 +1507,22 @@
+         "fast-string-truncated-width": "^3.0.2"
+       }
+     },
++    "node_modules/fast-uri": {
++      "version": "3.1.2",
++      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.2.tgz",
++      "integrity": "sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/fastify"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/fastify"
++        }
++      ],
++      "license": "BSD-3-Clause"
++    },
+     "node_modules/fast-wrap-ansi": {
+       "version": "0.2.0",
+       "resolved": "https://registry.npmjs.org/fast-wrap-ansi/-/fast-wrap-ansi-0.2.0.tgz",
+@@ -1066,6 +1532,45 @@
+         "fast-string-width": "^3.0.2"
+       }
+     },
++    "node_modules/finalhandler": {
++      "version": "2.1.1",
++      "resolved": "https://registry.npmjs.org/finalhandler/-/finalhandler-2.1.1.tgz",
++      "integrity": "sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==",
++      "license": "MIT",
++      "dependencies": {
++        "debug": "^4.4.0",
++        "encodeurl": "^2.0.0",
++        "escape-html": "^1.0.3",
++        "on-finished": "^2.4.1",
++        "parseurl": "^1.3.3",
++        "statuses": "^2.0.1"
++      },
++      "engines": {
++        "node": ">= 18.0.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/forwarded": {
++      "version": "0.2.0",
++      "resolved": "https://registry.npmjs.org/forwarded/-/forwarded-0.2.0.tgz",
++      "integrity": "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/fresh": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/fresh/-/fresh-2.0.0.tgz",
++      "integrity": "sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
+     "node_modules/fsevents": {
+       "version": "2.3.3",
+       "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
+@@ -1081,19 +1586,110 @@
+         "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
+       }
+     },
+-    "node_modules/get-tsconfig": {
+-      "version": "4.14.0",
+-      "resolved": "https://registry.npmjs.org/get-tsconfig/-/get-tsconfig-4.14.0.tgz",
+-      "integrity": "sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA==",
+-      "dev": true,
++    "node_modules/function-bind": {
++      "version": "1.1.2",
++      "resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
++      "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==",
+       "license": "MIT",
+-      "dependencies": {
+-        "resolve-pkg-maps": "^1.0.0"
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/get-intrinsic": {
++      "version": "1.3.0",
++      "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
++      "integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bind-apply-helpers": "^1.0.2",
++        "es-define-property": "^1.0.1",
++        "es-errors": "^1.3.0",
++        "es-object-atoms": "^1.1.1",
++        "function-bind": "^1.1.2",
++        "get-proto": "^1.0.1",
++        "gopd": "^1.2.0",
++        "has-symbols": "^1.1.0",
++        "hasown": "^2.0.2",
++        "math-intrinsics": "^1.1.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/get-proto": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
++      "integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
++      "license": "MIT",
++      "dependencies": {
++        "dunder-proto": "^1.0.1",
++        "es-object-atoms": "^1.0.0"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/get-tsconfig": {
++      "version": "4.14.0",
++      "resolved": "https://registry.npmjs.org/get-tsconfig/-/get-tsconfig-4.14.0.tgz",
++      "integrity": "sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "resolve-pkg-maps": "^1.0.0"
+       },
+       "funding": {
+         "url": "https://github.com/privatenumber/get-tsconfig?sponsor=1"
+       }
+     },
++    "node_modules/gopd": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
++      "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/has-symbols": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
++      "integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/hasown": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.4.tgz",
++      "integrity": "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==",
++      "license": "MIT",
++      "dependencies": {
++        "function-bind": "^1.1.2"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/hono": {
++      "version": "4.12.26",
++      "resolved": "https://registry.npmjs.org/hono/-/hono-4.12.26.tgz",
++      "integrity": "sha512-uyZtpnYxM9CmQ7QsQknM4zN8EftNqhON1qYeIKM0Se67CCEe2c44xyGURwB0axX2fBDu1dqHrHAc1hmNT8ITkw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=16.9.0"
++      }
++    },
+     "node_modules/htmlparser2": {
+       "version": "10.1.0",
+       "resolved": "https://registry.npmjs.org/htmlparser2/-/htmlparser2-10.1.0.tgz",
+@@ -1125,6 +1721,26 @@
+         "url": "https://github.com/fb55/entities?sponsor=1"
+       }
+     },
++    "node_modules/http-errors": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.1.tgz",
++      "integrity": "sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==",
++      "license": "MIT",
++      "dependencies": {
++        "depd": "~2.0.0",
++        "inherits": "~2.0.4",
++        "setprototypeof": "~1.2.0",
++        "statuses": "~2.0.2",
++        "toidentifier": "~1.0.1"
++      },
++      "engines": {
++        "node": ">= 0.8"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
+     "node_modules/iconv-lite": {
+       "version": "0.6.3",
+       "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.6.3.tgz",
+@@ -1137,6 +1753,124 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/inherits": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz",
++      "integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==",
++      "license": "ISC"
++    },
++    "node_modules/ip-address": {
++      "version": "10.2.0",
++      "resolved": "https://registry.npmjs.org/ip-address/-/ip-address-10.2.0.tgz",
++      "integrity": "sha512-/+S6j4E9AHvW9SWMSEY9Xfy66O5PWvVEJ08O0y5JGyEKQpojb0K0GKpz/v5HJ/G0vi3D2sjGK78119oXZeE0qA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 12"
++      }
++    },
++    "node_modules/ipaddr.js": {
++      "version": "1.9.1",
++      "resolved": "https://registry.npmjs.org/ipaddr.js/-/ipaddr.js-1.9.1.tgz",
++      "integrity": "sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.10"
++      }
++    },
++    "node_modules/is-promise": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/is-promise/-/is-promise-4.0.0.tgz",
++      "integrity": "sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ==",
++      "license": "MIT"
++    },
++    "node_modules/isexe": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/isexe/-/isexe-2.0.0.tgz",
++      "integrity": "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==",
++      "license": "ISC"
++    },
++    "node_modules/jose": {
++      "version": "6.2.3",
++      "resolved": "https://registry.npmjs.org/jose/-/jose-6.2.3.tgz",
++      "integrity": "sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==",
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/sponsors/panva"
++      }
++    },
++    "node_modules/json-schema-traverse": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/json-schema-traverse/-/json-schema-traverse-1.0.0.tgz",
++      "integrity": "sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==",
++      "license": "MIT"
++    },
++    "node_modules/json-schema-typed": {
++      "version": "8.0.2",
++      "resolved": "https://registry.npmjs.org/json-schema-typed/-/json-schema-typed-8.0.2.tgz",
++      "integrity": "sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==",
++      "license": "BSD-2-Clause"
++    },
++    "node_modules/math-intrinsics": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
++      "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
++    "node_modules/media-typer": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/media-typer/-/media-typer-1.1.0.tgz",
++      "integrity": "sha512-aisnrDP4GNe06UcKFnV5bfMNPBUw4jsLGaWwWfnH3v02GnBuXX2MCVn5RbrWo0j3pczUilYblq7fQ7Nw2t5XKw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/merge-descriptors": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-2.0.0.tgz",
++      "integrity": "sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/mime-db": {
++      "version": "1.54.0",
++      "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.54.0.tgz",
++      "integrity": "sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/mime-types": {
++      "version": "3.0.2",
++      "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-3.0.2.tgz",
++      "integrity": "sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==",
++      "license": "MIT",
++      "dependencies": {
++        "mime-db": "^1.54.0"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
++      "license": "MIT"
++    },
+     "node_modules/mute-stream": {
+       "version": "3.0.0",
+       "resolved": "https://registry.npmjs.org/mute-stream/-/mute-stream-3.0.0.tgz",
+@@ -1146,6 +1880,15 @@
+         "node": "^20.17.0 || >=22.9.0"
+       }
+     },
++    "node_modules/negotiator": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/negotiator/-/negotiator-1.0.0.tgz",
++      "integrity": "sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
+     "node_modules/nth-check": {
+       "version": "2.1.1",
+       "resolved": "https://registry.npmjs.org/nth-check/-/nth-check-2.1.1.tgz",
+@@ -1158,6 +1901,48 @@
+         "url": "https://github.com/fb55/nth-check?sponsor=1"
+       }
+     },
++    "node_modules/object-assign": {
++      "version": "4.1.1",
++      "resolved": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
++      "integrity": "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.10.0"
++      }
++    },
++    "node_modules/object-inspect": {
++      "version": "1.13.4",
++      "resolved": "https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.4.tgz",
++      "integrity": "sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/on-finished": {
++      "version": "2.4.1",
++      "resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.4.1.tgz",
++      "integrity": "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==",
++      "license": "MIT",
++      "dependencies": {
++        "ee-first": "1.1.1"
++      },
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/once": {
++      "version": "1.4.0",
++      "resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
++      "integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
++      "license": "ISC",
++      "dependencies": {
++        "wrappy": "1"
++      }
++    },
+     "node_modules/openai": {
+       "version": "6.34.0",
+       "resolved": "https://registry.npmjs.org/openai/-/openai-6.34.0.tgz",
+@@ -1228,6 +2013,120 @@
+         "url": "https://github.com/fb55/entities?sponsor=1"
+       }
+     },
++    "node_modules/parseurl": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
++      "integrity": "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/path-key": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/path-key/-/path-key-3.1.1.tgz",
++      "integrity": "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/path-to-regexp": {
++      "version": "8.4.2",
++      "resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-8.4.2.tgz",
++      "integrity": "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==",
++      "license": "MIT",
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/pkce-challenge": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/pkce-challenge/-/pkce-challenge-5.0.1.tgz",
++      "integrity": "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=16.20.0"
++      }
++    },
++    "node_modules/proxy-addr": {
++      "version": "2.0.7",
++      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
++      "integrity": "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==",
++      "license": "MIT",
++      "dependencies": {
++        "forwarded": "0.2.0",
++        "ipaddr.js": "1.9.1"
++      },
++      "engines": {
++        "node": ">= 0.10"
++      }
++    },
++    "node_modules/qs": {
++      "version": "6.15.2",
++      "resolved": "https://registry.npmjs.org/qs/-/qs-6.15.2.tgz",
++      "integrity": "sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==",
++      "license": "BSD-3-Clause",
++      "dependencies": {
++        "side-channel": "^1.1.0"
++      },
++      "engines": {
++        "node": ">=0.6"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/range-parser": {
++      "version": "1.2.1",
++      "resolved": "https://registry.npmjs.org/range-parser/-/range-parser-1.2.1.tgz",
++      "integrity": "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/raw-body": {
++      "version": "3.0.2",
++      "resolved": "https://registry.npmjs.org/raw-body/-/raw-body-3.0.2.tgz",
++      "integrity": "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==",
++      "license": "MIT",
++      "dependencies": {
++        "bytes": "~3.1.2",
++        "http-errors": "~2.0.1",
++        "iconv-lite": "~0.7.0",
++        "unpipe": "~1.0.0"
++      },
++      "engines": {
++        "node": ">= 0.10"
++      }
++    },
++    "node_modules/raw-body/node_modules/iconv-lite": {
++      "version": "0.7.2",
++      "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.7.2.tgz",
++      "integrity": "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==",
++      "license": "MIT",
++      "dependencies": {
++        "safer-buffer": ">= 2.1.2 < 3.0.0"
++      },
++      "engines": {
++        "node": ">=0.10.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/require-from-string": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/require-from-string/-/require-from-string-2.0.2.tgz",
++      "integrity": "sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.10.0"
++      }
++    },
+     "node_modules/resolve-pkg-maps": {
+       "version": "1.0.0",
+       "resolved": "https://registry.npmjs.org/resolve-pkg-maps/-/resolve-pkg-maps-1.0.0.tgz",
+@@ -1238,12 +2137,172 @@
+         "url": "https://github.com/privatenumber/resolve-pkg-maps?sponsor=1"
+       }
+     },
++    "node_modules/router": {
++      "version": "2.2.0",
++      "resolved": "https://registry.npmjs.org/router/-/router-2.2.0.tgz",
++      "integrity": "sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==",
++      "license": "MIT",
++      "dependencies": {
++        "debug": "^4.4.0",
++        "depd": "^2.0.0",
++        "is-promise": "^4.0.0",
++        "parseurl": "^1.3.3",
++        "path-to-regexp": "^8.0.0"
++      },
++      "engines": {
++        "node": ">= 18"
++      }
++    },
+     "node_modules/safer-buffer": {
+       "version": "2.1.2",
+       "resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
+       "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
+       "license": "MIT"
+     },
++    "node_modules/send": {
++      "version": "1.2.1",
++      "resolved": "https://registry.npmjs.org/send/-/send-1.2.1.tgz",
++      "integrity": "sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==",
++      "license": "MIT",
++      "dependencies": {
++        "debug": "^4.4.3",
++        "encodeurl": "^2.0.0",
++        "escape-html": "^1.0.3",
++        "etag": "^1.8.1",
++        "fresh": "^2.0.0",
++        "http-errors": "^2.0.1",
++        "mime-types": "^3.0.2",
++        "ms": "^2.1.3",
++        "on-finished": "^2.4.1",
++        "range-parser": "^1.2.1",
++        "statuses": "^2.0.2"
++      },
++      "engines": {
++        "node": ">= 18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/serve-static": {
++      "version": "2.2.1",
++      "resolved": "https://registry.npmjs.org/serve-static/-/serve-static-2.2.1.tgz",
++      "integrity": "sha512-xRXBn0pPqQTVQiC8wyQrKs2MOlX24zQ0POGaj0kultvoOCstBQM5yvOhAVSUwOMjQtTvsPWoNCHfPGwaaQJhTw==",
++      "license": "MIT",
++      "dependencies": {
++        "encodeurl": "^2.0.0",
++        "escape-html": "^1.0.3",
++        "parseurl": "^1.3.3",
++        "send": "^1.2.0"
++      },
++      "engines": {
++        "node": ">= 18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/setprototypeof": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz",
++      "integrity": "sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==",
++      "license": "ISC"
++    },
++    "node_modules/shebang-command": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/shebang-command/-/shebang-command-2.0.0.tgz",
++      "integrity": "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==",
++      "license": "MIT",
++      "dependencies": {
++        "shebang-regex": "^3.0.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/shebang-regex": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/shebang-regex/-/shebang-regex-3.0.0.tgz",
++      "integrity": "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/side-channel": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
++      "integrity": "sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0",
++        "object-inspect": "^1.13.4",
++        "side-channel-list": "^1.0.1",
++        "side-channel-map": "^1.0.1",
++        "side-channel-weakmap": "^1.0.2"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/side-channel-list": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.1.tgz",
++      "integrity": "sha512-mjn/0bi/oUURjc5Xl7IaWi/OJJJumuoJFQJfDDyO46+hBWsfaVM65TBHq2eoZBhzl9EchxOijpkbRC8SVBQU0w==",
++      "license": "MIT",
++      "dependencies": {
++        "es-errors": "^1.3.0",
++        "object-inspect": "^1.13.4"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/side-channel-map": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/side-channel-map/-/side-channel-map-1.0.1.tgz",
++      "integrity": "sha512-VCjCNfgMsby3tTdo02nbjtM/ewra6jPHmpThenkTYh8pG9ucZ/1P8So4u4FGBek/BjpOVsDCMoLA/iuBKIFXRA==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bound": "^1.0.2",
++        "es-errors": "^1.3.0",
++        "get-intrinsic": "^1.2.5",
++        "object-inspect": "^1.13.3"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/side-channel-weakmap": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/side-channel-weakmap/-/side-channel-weakmap-1.0.2.tgz",
++      "integrity": "sha512-WPS/HvHQTYnHisLo9McqBHOJk2FkHO/tlpvldyrnem4aeQp4hai3gythswg6p01oSoTl58rcpiFAjF2br2Ak2A==",
++      "license": "MIT",
++      "dependencies": {
++        "call-bound": "^1.0.2",
++        "es-errors": "^1.3.0",
++        "get-intrinsic": "^1.2.5",
++        "object-inspect": "^1.13.3",
++        "side-channel-map": "^1.0.1"
++      },
++      "engines": {
++        "node": ">= 0.4"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
+     "node_modules/signal-exit": {
+       "version": "4.1.0",
+       "resolved": "https://registry.npmjs.org/signal-exit/-/signal-exit-4.1.0.tgz",
+@@ -1256,6 +2315,24 @@
+         "url": "https://github.com/sponsors/isaacs"
+       }
+     },
++    "node_modules/statuses": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz",
++      "integrity": "sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/toidentifier": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz",
++      "integrity": "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.6"
++      }
++    },
+     "node_modules/tsx": {
+       "version": "4.21.0",
+       "resolved": "https://registry.npmjs.org/tsx/-/tsx-4.21.0.tgz",
+@@ -1276,6 +2353,37 @@
+         "fsevents": "~2.3.3"
+       }
+     },
++    "node_modules/type-is": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/type-is/-/type-is-2.1.0.tgz",
++      "integrity": "sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==",
++      "license": "MIT",
++      "dependencies": {
++        "content-type": "^2.0.0",
++        "media-typer": "^1.1.0",
++        "mime-types": "^3.0.0"
++      },
++      "engines": {
++        "node": ">= 18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/type-is/node_modules/content-type": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/content-type/-/content-type-2.0.0.tgz",
++      "integrity": "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
+     "node_modules/typescript": {
+       "version": "6.0.3",
+       "resolved": "https://registry.npmjs.org/typescript/-/typescript-6.0.3.tgz",
+@@ -1306,6 +2414,24 @@
+       "devOptional": true,
+       "license": "MIT"
+     },
++    "node_modules/unpipe": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
++      "integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
++    "node_modules/vary": {
++      "version": "1.1.2",
++      "resolved": "https://registry.npmjs.org/vary/-/vary-1.1.2.tgz",
++      "integrity": "sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
+     "node_modules/whatwg-encoding": {
+       "version": "3.1.1",
+       "resolved": "https://registry.npmjs.org/whatwg-encoding/-/whatwg-encoding-3.1.1.tgz",
+@@ -1328,6 +2454,27 @@
+         "node": ">=18"
+       }
+     },
++    "node_modules/which": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/which/-/which-2.0.2.tgz",
++      "integrity": "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==",
++      "license": "ISC",
++      "dependencies": {
++        "isexe": "^2.0.0"
++      },
++      "bin": {
++        "node-which": "bin/node-which"
++      },
++      "engines": {
++        "node": ">= 8"
++      }
++    },
++    "node_modules/wrappy": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
++      "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==",
++      "license": "ISC"
++    },
+     "node_modules/zod": {
+       "version": "4.3.6",
+       "resolved": "https://registry.npmjs.org/zod/-/zod-4.3.6.tgz",
+@@ -1336,6 +2483,15 @@
+       "funding": {
+         "url": "https://github.com/sponsors/colinhacks"
+       }
++    },
++    "node_modules/zod-to-json-schema": {
++      "version": "3.25.2",
++      "resolved": "https://registry.npmjs.org/zod-to-json-schema/-/zod-to-json-schema-3.25.2.tgz",
++      "integrity": "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==",
++      "license": "ISC",
++      "peerDependencies": {
++        "zod": "^3.25.28 || ^4"
++      }
+     }
+   }
+ }
+diff --git a/package.json b/package.json
+index fcb1fb0..12fc575 100644
+--- a/package.json
++++ b/package.json
+@@ -12,10 +12,12 @@
+   "type": "commonjs",
+   "dependencies": {
+     "@inquirer/prompts": "^8.4.2",
++    "@modelcontextprotocol/sdk": "^1.29.0",
+     "cheerio": "^1.2.0",
+     "dotenv": "^17.4.2",
+     "openai": "^6.34.0",
+-    "zod": "^4.3.6"
++    "zod": "^4.3.6",
++    "zod-to-json-schema": "^3.25.2"
+   },
+   "devDependencies": {
+     "@types/node": "^25.6.0",
+diff --git a/src/agent.ts b/src/agent.ts
+index 66ff46f..dc16693 100644
+--- a/src/agent.ts
++++ b/src/agent.ts
+@@ -2,14 +2,14 @@ import * as fs from "fs";
+ import * as path from "path";
+ import { openai } from "./llmClient";
+ import { extractToolCalls } from "./parser";
+-import { availableTools, executeTool } from "./tools";
+-import { promptUser } from "./promptUser";
++import { ToolRegistry } from "./tools";
++import { confirmAction } from "./promptUser";
+ 
+-const SYSTEM_PROMPT = `You are an autonomous AI assistant running locally on Qwen 2.5 Coder.
++const SYSTEM_PROMPT = `You are an autonomous AI assistant.
+ You have access to the following tools:
+-${JSON.stringify(availableTools, null, 2)}
++{TOOL_SCHEMAS}
+ 
+-You MUST think before you act. Use a <thought>...</thought> block to analyze the user's request, plan your approach, or reason about the results of your tools.
++You MUST think before you act. Use a <think>...</think> block to analyze the user's request, plan your approach, or reason about the results of your tools.
+ After your thought block, to use a tool, you MUST respond EXACTLY with a JSON object in this format, and NOTHING ELSE:
+ {
+   "tool": "tool_name",
+@@ -18,135 +18,157 @@ After your thought block, to use a tool, you MUST respond EXACTLY with a JSON ob
+   }
+ }
+ 
+-Do not add conversational text or greetings outside the thought block. Your response must end with the JSON tool call.
++Do not add conversational text or greetings outside the think block. Your response must end with the JSON tool call.
+ You can use multiple tools in sequence. When you are completely finished with the user's request, call the "finish_task" tool with your final answer.
+ `;
+ 
+-// Global message history
+-let globalMessages: any[] = [
+-  { role: "system", content: SYSTEM_PROMPT }
+-];
++export class Agent {
++  private globalMessages: any[] = [];
++  private historyFile: string;
++  private maxIterations: number;
++  private maxMessages: number;
++
++  constructor(historyFilePath: string = ".agent_history.json", maxIterations = 256, maxMessages = 20) {
++    this.historyFile = path.join(process.cwd(), historyFilePath);
++    this.maxIterations = maxIterations;
++    this.maxMessages = maxMessages;
++    this.resetMessages();
++  }
+ 
+-const HISTORY_FILE = path.join(process.cwd(), ".agent_history.json");
++  private getSystemPrompt(): string {
++    const schemas = JSON.stringify(ToolRegistry.getSchemas(), null, 2);
++    return SYSTEM_PROMPT.replace("{TOOL_SCHEMAS}", schemas);
++  }
+ 
+-export function loadHistory() {
+-  if (fs.existsSync(HISTORY_FILE)) {
+-    try {
+-      const data = fs.readFileSync(HISTORY_FILE, "utf-8");
+-      const parsed = JSON.parse(data);
+-      if (Array.isArray(parsed) && parsed.length > 0) {
+-        // Atualiza a primeira mensagem com o SYSTEM_PROMPT atual para garantir que as ferramentas estejam sempre atualizadas
+-        parsed[0] = { role: "system", content: SYSTEM_PROMPT };
+-        globalMessages = parsed;
+-        console.log(`[Memória restaurada: ${globalMessages.length} mensagens no contexto]`);
++  private resetMessages() {
++    this.globalMessages = [
++      { role: "system", content: this.getSystemPrompt() }
++    ];
++  }
++
++  public loadHistory() {
++    if (fs.existsSync(this.historyFile)) {
++      try {
++        const data = fs.readFileSync(this.historyFile, "utf-8");
++        const parsed = JSON.parse(data);
++        if (Array.isArray(parsed) && parsed.length > 0) {
++          parsed[0] = { role: "system", content: this.getSystemPrompt() };
++          this.globalMessages = parsed;
++          console.log(`[Memória restaurada: ${this.globalMessages.length} mensagens no contexto]`);
++        }
++      } catch (e) {
++        console.log("[Erro ao carregar histórico]:", e);
+       }
++    }
++  }
++
++  public saveHistory() {
++    try {
++      fs.writeFileSync(this.historyFile, JSON.stringify(this.globalMessages, null, 2), "utf-8");
+     } catch (e) {
+-      console.log("[Erro ao carregar histórico]:", e);
++      console.log("[Erro ao salvar histórico]:", e);
+     }
+   }
+-}
+ 
+-export function saveHistory() {
+-  try {
+-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(globalMessages, null, 2), "utf-8");
+-  } catch (e) {
+-    console.log("[Erro ao salvar histórico]:", e);
++  public clearHistory() {
++    this.resetMessages();
++    this.saveHistory();
++    console.log("[Memória apagada com sucesso]");
+   }
+-}
+ 
+-export function clearHistory() {
+-  globalMessages = [
+-    { role: "system", content: SYSTEM_PROMPT }
+-  ];
+-  saveHistory();
+-  console.log("[Memória apagada com sucesso]");
+-}
++  public async runStep(userPrompt: string) {
++    this.globalMessages.push({ role: "user", content: userPrompt });
++    this.saveHistory();
+ 
+-export async function runAgentStep(userPrompt: string) {
+-  // Add user prompt to history
+-  globalMessages.push({ role: "user", content: userPrompt });
+-  saveHistory();
+-
+-  const MAX_ITERATIONS = 256;
+-  let loops = 0;
+-  while (loops < MAX_ITERATIONS) {
+-    loops++;
+-
+-    // Sliding Window: Limitar o número de mensagens para evitar estourar o limite de tokens
+-    const MAX_MESSAGES = 20;
+-    if (globalMessages.length > MAX_MESSAGES) {
+-      globalMessages = [
+-        globalMessages[0], // System prompt
+-        ...globalMessages.slice(-(MAX_MESSAGES - 1)) // Últimas mensagens
+-      ];
+-    }
++    let loops = 0;
++    while (loops < this.maxIterations) {
++      loops++;
+ 
+-    console.log("...pensando...");
+-    const response = await openai.chat.completions.create({
+-      model: process.env.LLM_MODEL || "qwen-35b-turboquant",
+-      messages: globalMessages,
+-      temperature: 0.1,
+-    });
++      // Sliding Window
++      if (this.globalMessages.length > this.maxMessages) {
++        this.globalMessages = [
++          this.globalMessages[0], // System prompt
++          ...this.globalMessages.slice(-(this.maxMessages - 1)) // Últimas mensagens
++        ];
++      }
+ 
++      console.log("...pensando...");
++      const response = await openai.chat.completions.create({
++        model: process.env.LLM_MODEL || "qwen-35b-turboquant",
++        messages: this.globalMessages,
++        temperature: 0.1,
++      });
+ 
+-    const reply = response.choices[0].message.content || "";
+-    console.log(`\n[LLM Raw Reply]:\n${reply}\n`);
++      const reply = response.choices[0].message.content || "";
++      console.log(`\n[LLM Raw Reply]:\n${reply}\n`);
+ 
+-    globalMessages.push({ role: "assistant", content: reply });
+-    saveHistory();
++      this.globalMessages.push({ role: "assistant", content: reply });
++      this.saveHistory();
+ 
+-    const toolCall = extractToolCalls(reply);
++      const toolCall = extractToolCalls(reply);
+ 
+-    if (toolCall && toolCall.tool) {
+-      console.log(`\n[Ação Solicitada]: ${toolCall.tool}`);
+-      console.log(`[Argumentos]: ${JSON.stringify(toolCall.args, null, 2)}`);
++      if (toolCall && toolCall.tool) {
++        console.log(`\n[Ação Solicitada]: ${toolCall.tool}`);
++        console.log(`[Argumentos]: ${JSON.stringify(toolCall.args, null, 2)}`);
+ 
+-      if (toolCall.tool === "finish_task") {
+-        console.log(`\n[RESPOSTA FINAL]:\n${toolCall.args?.finalAnswer || 'Concluído'}\n`);
+-        return; // End the current task loop
+-      }
++        if (toolCall.tool === "finish_task") {
++          console.log(`\n[RESPOSTA FINAL]:\n${toolCall.args?.finalAnswer || 'Concluído'}\n`);
++          return;
++        }
+ 
+-      // Human-in-the-Loop check
+-      if (toolCall.tool === "write_file" || toolCall.tool === "run_command" || toolCall.tool === "replace_in_file") {
+-        const answer = await promptUser(`\n⚠️ O Agente quer executar a ferramenta perigosa '${toolCall.tool}'. Aprovar? [y/N]: `);
+-        if (answer.toLowerCase() !== 'y') {
+-          console.log("[Ação Negada]");
+-          globalMessages.push({
+-            role: "user",
+-            content: `Tool '${toolCall.tool}' failed: User denied permission.`
+-          });
+-          saveHistory();
+-          continue; // Go back to LLM so it knows it failed
++        const tool = ToolRegistry.getTool(toolCall.tool);
++        if (!tool) {
++            console.log(`[Erro]: Ferramenta desconhecida: ${toolCall.tool}`);
++            this.globalMessages.push({
++                role: "user",
++                content: `Error: Tool '${toolCall.tool}' does not exist.`
++            });
++            this.saveHistory();
++            continue;
+         }
+-      }
+ 
+-      // Execute tool
+-      console.log(`[Executando...]`);
+-      const toolResult = await executeTool(toolCall.tool, toolCall.args);
+-      console.log(`[Status da Ferramenta]:`, toolResult.success ? "SUCESSO" : "ERRO");
++        // Human-in-the-Loop check
++        if (tool.dangerous) {
++          const approved = await confirmAction(`\n⚠️ O Agente quer executar a ferramenta perigosa '${toolCall.tool}'. Aprovar?`, false);
++          if (!approved) {
++            console.log("[Ação Negada]");
++            this.globalMessages.push({
++              role: "user",
++              content: `Tool '${toolCall.tool}' failed: User denied permission.`
++            });
++            this.saveHistory();
++            continue;
++          }
++        }
+ 
+-      let resultString = JSON.stringify(toolResult);
+-      if (resultString.length > 3000) {
+-        resultString = resultString.substring(0, 3000) + "\n\n... [Saída truncada para economizar tokens. Se precisar do resto, refine a busca ou use paginação.]";
+-      }
++        // Execute tool with validation
++        console.log(`[Executando...]`);
++        const toolResult = await ToolRegistry.execute(toolCall.tool, toolCall.args);
++        console.log(`[Status da Ferramenta]:`, toolResult.success ? "SUCESSO" : "ERRO");
+ 
+-      globalMessages.push({
+-        role: "user",
+-        content: `Tool '${toolCall.tool}' returned:\n${resultString}`
+-      });
+-      saveHistory();
++        let resultString = JSON.stringify(toolResult);
++        if (resultString.length > 3000) {
++          resultString = resultString.substring(0, 3000) + "\n\n... [Saída truncada para economizar tokens. Se precisar do resto, refine a busca ou use paginação.]";
++        }
+ 
+-    } else {
+-      console.log("[Aviso]: Não foi possível extrair a ferramenta. Corrigindo o modelo...");
+-      globalMessages.push({
+-        role: "user",
+-        content: "I could not parse a valid tool call JSON from your response. Please output ONLY the JSON object with 'tool' and 'args' keys."
+-      });
+-      saveHistory();
++        this.globalMessages.push({
++          role: "user",
++          content: `Tool '${toolCall.tool}' returned:\n${resultString}`
++        });
++        this.saveHistory();
++
++      } else {
++        console.log("[Aviso]: Não foi possível extrair a ferramenta. Corrigindo o modelo...");
++        this.globalMessages.push({
++          role: "user",
++          content: "I could not parse a valid tool call JSON from your response. Please output ONLY the JSON object with 'tool' and 'args' keys."
++        });
++        this.saveHistory();
++      }
+     }
+-  }
+ 
+-  if (loops >= MAX_ITERATIONS) {
+-    console.log("Limite máximo de iterações atingido. Abortando.");
++    if (loops >= this.maxIterations) {
++      console.log("Limite máximo de iterações atingido. Abortando.");
++    }
+   }
+ }
+diff --git a/src/index.ts b/src/index.ts
+index c293876..2720d32 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,8 +1,10 @@
+-import { runAgentStep, loadHistory, clearHistory } from "./agent";
++import { Agent } from "./agent";
+ import { promptUser } from "./promptUser";
+ import { initLLM } from "./llmClient";
+ 
+ import { select } from '@inquirer/prompts';
++import { findLocalManifest, loadManifest } from "./mcp/manifest";
++import { MCPClientManager } from "./mcp/client";
+ 
+ async function main() {
+   console.log("=========================================");
+@@ -34,28 +36,45 @@ async function main() {
+   initLLM("http://172.24.160.1:18080/v1", "llama.cpp");
+   console.log(`-> ✅ Selecionado: ${modelOption === 'qwq' ? 'QwQ 32B' : modelOption === 'omniagent' ? 'Qwen 3.6 35B TurboQuant' : 'Qwen 2.5 Coder 14B'} (via OmniAgent)\n`);
+ 
+-  console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file");
++  console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file, etc.");
+   console.log("Comandos de chat iterativo ativados.");
+   console.log("Digite 'exit' ou 'sair' para encerrar. Digite 'clear' ou 'limpar' para resetar a memória.");
+   console.log("=========================================\n");
+ 
+ 
+-  loadHistory();
++  // Initialize MCP Tools
++  const mcpManifestPath = findLocalManifest();
++  const mcpManager = new MCPClientManager();
++  if (mcpManifestPath) {
++    console.log(`[MCP] Manifest found at ${mcpManifestPath}`);
++    const manifest = loadManifest(mcpManifestPath);
++    if (manifest && manifest.mcpServers) {
++      for (const [name, config] of Object.entries(manifest.mcpServers)) {
++        await mcpManager.startServer(name, config);
++      }
++    }
++  } else {
++    console.log("[MCP] No manifest found.");
++  }
++
++  const agent = new Agent();
++  agent.loadHistory();
+ 
+   while (true) {
+-    const prompt = await promptUser("\nVocê: ");
++    const prompt = await promptUser("Você: ");
+     
+     if (prompt.trim() === "") continue;
+     if (prompt.toLowerCase() === "exit" || prompt.toLowerCase() === "sair") {
+       console.log("Encerrando agente...");
++      await mcpManager.closeAll();
+       break;
+     }
+     if (prompt.toLowerCase() === "clear" || prompt.toLowerCase() === "limpar") {
+-      clearHistory();
++      agent.clearHistory();
+       continue;
+     }
+ 
+-    await runAgentStep(prompt);
++    await agent.runStep(prompt);
+   }
+ }
+ 
+diff --git a/src/promptUser.ts b/src/promptUser.ts
+index 7d64903..245f4de 100644
+--- a/src/promptUser.ts
++++ b/src/promptUser.ts
+@@ -1,15 +1,9 @@
+-import * as readline from "readline";
++import { input, confirm } from "@inquirer/prompts";
+ 
+-export function promptUser(question: string): Promise<string> {
+-  const rl = readline.createInterface({
+-    input: process.stdin,
+-    output: process.stdout,
+-  });
++export async function promptUser(question: string): Promise<string> {
++  return await input({ message: question });
++}
+ 
+-  return new Promise((resolve) => {
+-    rl.question(question, (answer) => {
+-      rl.close();
+-      resolve(answer);
+-    });
+-  });
++export async function confirmAction(message: string, defaultAnswer: boolean = false): Promise<boolean> {
++  return await confirm({ message, default: defaultAnswer });
+ }
+diff --git a/src/tools.ts b/src/tools.ts
+index 270b7a3..966c912 100644
+--- a/src/tools.ts
++++ b/src/tools.ts
+@@ -3,6 +3,7 @@ import * as path from "path";
+ import { exec, spawn, ChildProcess } from "child_process";
+ import { promisify } from "util";
+ import * as cheerio from "cheerio";
++import { z } from "zod";
+ 
+ const execPromise = promisify(exec);
+ 
+@@ -15,7 +16,6 @@ function resolveFilePath(targetPath: string, rootDir: string = "."): string {
+     return absolutePath;
+   }
+   
+-  // If it doesn't exist, search for it by filename
+   const fileName = path.basename(targetPath);
+   let foundPath: string | null = null;
+   
+@@ -74,186 +74,10 @@ function searchFilesHelper(dir: string, pattern: string, isCaseSensitive: boolea
+   return results;
+ }
+ 
+-export interface ToolDef {
+-  name: string;
+-  description: string;
+-  parameters: object;
+-}
+-
+-export const availableTools: ToolDef[] = [
+-  {
+-    name: "read_file",
+-    description: "Reads the content of a file",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "Absolute or relative path to the file" },
+-      },
+-      required: ["filePath"],
+-    },
+-  },
+-  {
+-    name: "list_files",
+-    description: "Lists files in a directory",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        dirPath: { type: "string", description: "Directory path to list" },
+-      },
+-      required: ["dirPath"],
+-    },
+-  },
+-  {
+-    name: "write_file",
+-    description: "Writes content to a file (creates or overwrites it)",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "Absolute or relative path to the file" },
+-        content: { type: "string", description: "The content to write" },
+-      },
+-      required: ["filePath", "content"],
+-    },
+-  },
+-  {
+-    name: "run_command",
+-    description: "Executes a command in the terminal",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        command: { type: "string", description: "The terminal command to execute" },
+-        cwd: { type: "string", description: "Optional current working directory for the command" },
+-      },
+-      required: ["command"],
+-    },
+-  },
+-  {
+-    name: "replace_in_file",
+-    description: "Replaces all exact occurrences of a string in a file.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "Absolute or relative path to the file" },
+-        searchValue: { type: "string", description: "The exact string to find and replace" },
+-        replaceValue: { type: "string", description: "The new string to insert" }
+-      },
+-      required: ["filePath", "searchValue", "replaceValue"]
+-    }
+-  },
+-  {
+-    name: "search_files",
+-    description: "Searches for a string across files in a directory, ignoring node_modules and .git. Returns a list of matches with ABSOLUTE paths and line numbers. IMPORTANT: Always use the exact absolute path returned by this tool when using other tools like read_file or patch_file.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        dirPath: { type: "string", description: "The directory to search in" },
+-        pattern: { type: "string", description: "The string to search for" },
+-        isCaseSensitive: { type: "boolean", description: "Whether the search should be case sensitive. Defaults to false." }
+-      },
+-      required: ["dirPath", "pattern"]
+-    }
+-  },
+-  {
+-    name: "finish_task",
+-    description: "Call this when the task is fully completed to report the final answer to the user.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        finalAnswer: { type: "string", description: "The final answer or summary of what was done" },
+-      },
+-      required: ["finalAnswer"],
+-    },
+-  },
+-  {
+-    name: "web_search",
+-    description: "Searches the web using DuckDuckGo and returns a list of URLs and snippets",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        query: { type: "string", description: "The search query" },
+-      },
+-      required: ["query"]
+-    }
+-  },
+-  {
+-    name: "fetch_url",
+-    description: "Fetches a URL and extracts clean text from the HTML, removing scripts and styles",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        url: { type: "string", description: "The URL to fetch" },
+-      },
+-      required: ["url"]
+-    }
+-  },
+-  {
+-    name: "start_background_command",
+-    description: "Starts a background command (e.g. npm run dev). Returns immediately with a process ID.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        command: { type: "string", description: "The terminal command to execute" },
+-        id: { type: "string", description: "A unique ID for this process (e.g., 'dev-server')" },
+-        cwd: { type: "string", description: "Optional working directory" }
+-      },
+-      required: ["command", "id"]
+-    }
+-  },
+-  {
+-    name: "read_process_logs",
+-    description: "Reads the recent logs (stdout/stderr) of a background process.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        id: { type: "string", description: "The ID of the process" },
+-        lines: { type: "number", description: "Number of recent lines to read. Defaults to 100." }
+-      },
+-      required: ["id"]
+-    }
+-  },
+-  {
+-    name: "stop_background_process",
+-    description: "Stops a running background process.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        id: { type: "string", description: "The ID of the process" }
+-      },
+-      required: ["id"]
+-    }
+-  },
+-  {
+-    name: "patch_file",
+-    description: "Replaces a specific range of lines in a file with new content. Useful for large refactors where replace_in_file is insufficient.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        filePath: { type: "string", description: "EXACT ABSOLUTE path to the file" },
+-        startLine: { type: "number", description: "The 1-indexed starting line number to replace (inclusive)" },
+-        endLine: { type: "number", description: "The 1-indexed ending line number to replace (inclusive)" },
+-        content: { type: "string", description: "The new content to insert in place of the specified lines" }
+-      },
+-      required: ["filePath", "startLine", "endLine", "content"]
+-    }
+-  },
+-  {
+-    name: "analyze_codebase",
+-    description: "Semantically analyzes a file or directory to extract only the structure (functions, classes, interfaces, exports). Use this to explore a codebase quickly without wasting context window on full file contents.",
+-    parameters: {
+-      type: "object",
+-      properties: {
+-        path: { type: "string", description: "Absolute path to the file or directory to analyze" }
+-      },
+-      required: ["path"]
+-    }
+-  }
+-];
+-
+ function extractSignatures(content: string, filename: string): string[] {
+   const signatures: string[] = [];
+   const lines = content.split('\n');
+   
+-  // Basic semantic regexes for TS/JS
+   const regexes = [
+     /^(?:export\s+)?(?:default\s+)?class\s+\w+/i,
+     /^(?:export\s+)?interface\s+\w+/i,
+@@ -275,230 +99,298 @@ function extractSignatures(content: string, filename: string): string[] {
+   return signatures;
+ }
+ 
+-export async function executeTool(toolName: string, args: any): Promise<any> {
+-  switch (toolName) {
+-    case "read_file":
+-      try {
+-        const filePath = resolveFilePath(args.filePath);
+-        if (!fs.existsSync(filePath)) {
+-          return { success: false, error: `File not found: ${args.filePath}` };
+-        }
+-        const content = fs.readFileSync(filePath, "utf-8");
+-        return { success: true, content };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "list_files":
+-      try {
+-        const files = fs.readdirSync(path.resolve(args.dirPath));
+-        return { success: true, files };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "write_file":
+-      try {
+-        const filePath = path.resolve(args.filePath); // Write always uses exact path
+-        fs.writeFileSync(filePath, args.content, "utf-8");
+-        return { success: true, message: `File ${args.filePath} written successfully.` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "replace_in_file":
+-      try {
+-        const filePath = resolveFilePath(args.filePath);
+-        if (!fs.existsSync(filePath)) {
+-          return { success: false, error: `File not found: ${args.filePath}` };
+-        }
+-        let content = fs.readFileSync(filePath, "utf-8");
+-        if (!content.includes(args.searchValue)) {
+-           return { success: false, error: "The searchValue was not found in the file." };
+-        }
+-        content = content.split(args.searchValue).join(args.replaceValue);
+-        fs.writeFileSync(filePath, content, "utf-8");
+-        return { success: true, message: `Replaced all occurrences in ${args.filePath}` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "patch_file":
+-      try {
+-        const filePath = resolveFilePath(args.filePath);
+-        if (!fs.existsSync(filePath)) {
+-          return { success: false, error: `File not found: ${args.filePath}` };
+-        }
+-        let content = fs.readFileSync(filePath, "utf-8");
+-        const lines = content.split('\n');
+-        const startIdx = args.startLine - 1;
+-        const endIdx = args.endLine - 1;
+-        
+-        if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) {
+-            return { success: false, error: `Invalid line range. File has ${lines.length} lines.` };
+-        }
++import { zodToJsonSchema } from "zod-to-json-schema";
+ 
+-        const newLines = args.content.split('\n');
+-        lines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
+-        
+-        fs.writeFileSync(filePath, lines.join('\n'), "utf-8");
+-        return { success: true, message: `Patched lines ${args.startLine} to ${args.endLine} in ${args.filePath}` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
++export interface ToolDef<T extends z.ZodTypeAny> {
++  name: string;
++  description: string;
++  schema: T;
++  dangerous?: boolean;
++  execute: (args: z.infer<T>) => Promise<any> | any;
++}
++
++class Registry {
++  private tools: Map<string, ToolDef<any>> = new Map();
++
++  register<T extends z.ZodTypeAny>(tool: ToolDef<T>) {
++    this.tools.set(tool.name, tool);
++  }
++
++  getTool(name: string): ToolDef<any> | undefined {
++    return this.tools.get(name);
++  }
++
++  getSchemas() {
++    return Array.from(this.tools.values()).map(tool => ({
++      name: tool.name,
++      description: tool.description,
++      parameters: (tool as any)._mcpJsonSchema || zodToJsonSchema(tool.schema)
++    }));
++  }
++
++  async execute(name: string, args: any): Promise<any> {
++    const tool = this.tools.get(name);
++    if (!tool) {
++      return { success: false, error: `Tool ${name} not found.` };
++    }
++
++    try {
++      const parsedArgs = tool.schema.parse(args);
++      return await tool.execute(parsedArgs);
++    } catch (e: any) {
++      if (e instanceof z.ZodError) {
++        return { success: false, error: "Validation Error: " + (e as any).errors.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ') };
+       }
+-    case "analyze_codebase":
+-      try {
+-        const targetPath = resolveFilePath(args.path);
+-        if (!fs.existsSync(targetPath)) {
+-          return { success: false, error: `Path not found: ${args.path}` };
+-        }
+-        
+-        let results: string[] = [];
+-        const stat = fs.statSync(targetPath);
+-        
+-        if (stat.isDirectory()) {
+-          const files = searchFilesHelper(targetPath, ""); // Quick way to get all files
+-          // Extract signatures from each file
+-          const uniqueFiles = [...new Set(files.map(f => f.split(':')[0]))];
+-          
+-          for (const file of uniqueFiles) {
+-            if (file.endsWith('.ts') || file.endsWith('.js') || file.endsWith('.jsx') || file.endsWith('.tsx')) {
+-               const content = fs.readFileSync(file, "utf-8");
+-               const sigs = extractSignatures(content, file);
+-               if (sigs.length > 0) {
+-                 results.push(`\n--- ${file} ---`);
+-                 results.push(...sigs);
+-               }
+-            }
++      return { success: false, error: e.message || String(e) };
++    }
++  }
++}
++
++export const ToolRegistry = new Registry();
++
++// Registry setup
++ToolRegistry.register({
++  name: "read_file",
++  description: "Reads the content of a file",
++  schema: z.object({ filePath: z.string().describe("Absolute or relative path to the file") }),
++  execute: (args) => {
++    const filePath = resolveFilePath(args.filePath);
++    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
++    return { success: true, content: fs.readFileSync(filePath, "utf-8") };
++  }
++});
++
++ToolRegistry.register({
++  name: "list_files",
++  description: "Lists files in a directory",
++  schema: z.object({ dirPath: z.string().describe("Directory path to list") }),
++  execute: (args) => {
++    return { success: true, files: fs.readdirSync(path.resolve(args.dirPath)) };
++  }
++});
++
++ToolRegistry.register({
++  name: "write_file",
++  description: "Writes content to a file (creates or overwrites it)",
++  dangerous: true,
++  schema: z.object({ 
++    filePath: z.string().describe("Absolute or relative path to the file"),
++    content: z.string().describe("The content to write")
++  }),
++  execute: (args) => {
++    const filePath = path.resolve(args.filePath);
++    fs.writeFileSync(filePath, args.content, "utf-8");
++    return { success: true, message: `File ${args.filePath} written successfully.` };
++  }
++});
++
++ToolRegistry.register({
++  name: "run_command",
++  description: "Executes a command in the terminal",
++  dangerous: true,
++  schema: z.object({
++    command: z.string().describe("The terminal command to execute"),
++    cwd: z.string().optional().describe("Optional current working directory")
++  }),
++  execute: async (args) => {
++    const options = args.cwd ? { cwd: path.resolve(args.cwd) } : {};
++    try {
++      const { stdout, stderr } = await execPromise(args.command, options);
++      return { success: true, stdout, stderr };
++    } catch (e: any) {
++      return { success: false, error: e.message, stdout: e.stdout, stderr: e.stderr };
++    }
++  }
++});
++
++ToolRegistry.register({
++  name: "replace_in_file",
++  description: "Replaces all exact occurrences of a string in a file.",
++  dangerous: true,
++  schema: z.object({
++    filePath: z.string(),
++    searchValue: z.string(),
++    replaceValue: z.string()
++  }),
++  execute: (args) => {
++    const filePath = resolveFilePath(args.filePath);
++    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
++    let content = fs.readFileSync(filePath, "utf-8");
++    if (!content.includes(args.searchValue)) throw new Error("The searchValue was not found in the file.");
++    content = content.split(args.searchValue).join(args.replaceValue);
++    fs.writeFileSync(filePath, content, "utf-8");
++    return { success: true, message: `Replaced all occurrences in ${args.filePath}` };
++  }
++});
++
++ToolRegistry.register({
++  name: "search_files",
++  description: "Searches for a string across files in a directory, ignoring node_modules and .git. Returns absolute paths.",
++  schema: z.object({
++    dirPath: z.string(),
++    pattern: z.string(),
++    isCaseSensitive: z.boolean().optional().default(false)
++  }),
++  execute: (args) => {
++    const dir = path.resolve(args.dirPath);
++    if (!fs.existsSync(dir)) throw new Error(`Directory not found: ${args.dirPath}`);
++    return { success: true, results: searchFilesHelper(dir, args.pattern, args.isCaseSensitive) };
++  }
++});
++
++ToolRegistry.register({
++  name: "patch_file",
++  description: "Replaces a specific range of lines in a file with new content. Useful for large refactors.",
++  dangerous: true,
++  schema: z.object({
++    filePath: z.string().describe("EXACT ABSOLUTE path to the file"),
++    startLine: z.number().describe("The 1-indexed starting line number (inclusive)"),
++    endLine: z.number().describe("The 1-indexed ending line number (inclusive)"),
++    content: z.string().describe("The new content to insert")
++  }),
++  execute: (args) => {
++    const filePath = resolveFilePath(args.filePath);
++    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${args.filePath}`);
++    let content = fs.readFileSync(filePath, "utf-8");
++    const lines = content.split('\n');
++    const startIdx = args.startLine - 1;
++    const endIdx = args.endLine - 1;
++    if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) {
++      throw new Error(`Invalid line range. File has ${lines.length} lines.`);
++    }
++    const newLines = args.content.split('\n');
++    lines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
++    fs.writeFileSync(filePath, lines.join('\n'), "utf-8");
++    return { success: true, message: `Patched lines ${args.startLine} to ${args.endLine} in ${args.filePath}` };
++  }
++});
++
++ToolRegistry.register({
++  name: "analyze_codebase",
++  description: "Semantically analyzes a file or directory to extract only the structure.",
++  schema: z.object({ path: z.string() }),
++  execute: (args) => {
++    const targetPath = resolveFilePath(args.path);
++    if (!fs.existsSync(targetPath)) throw new Error(`Path not found: ${args.path}`);
++    let results: string[] = [];
++    const stat = fs.statSync(targetPath);
++    if (stat.isDirectory()) {
++      const files = searchFilesHelper(targetPath, "");
++      const uniqueFiles = [...new Set(files.map(f => f.split(':')[0]))];
++      for (const file of uniqueFiles) {
++        if (file.match(/\.(ts|js|jsx|tsx)$/)) {
++          const content = fs.readFileSync(file, "utf-8");
++          const sigs = extractSignatures(content, file);
++          if (sigs.length > 0) {
++            results.push(`\n--- ${file} ---`, ...sigs);
+           }
+-        } else {
+-          const content = fs.readFileSync(targetPath, "utf-8");
+-          results = extractSignatures(content, targetPath);
+-        }
+-        
+-        if (results.length === 0) return { success: true, analysis: "No structures found." };
+-        return { success: true, analysis: results.join('\n') };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "run_command":
+-      try {
+-        const options = args.cwd ? { cwd: path.resolve(args.cwd) } : {};
+-        const { stdout, stderr } = await execPromise(args.command, options);
+-        return { success: true, stdout, stderr };
+-      } catch (e: any) {
+-        return { success: false, error: e.message, stdout: e.stdout, stderr: e.stderr };
+-      }
+-    case "search_files":
+-      try {
+-        const dir = path.resolve(args.dirPath);
+-        if (!fs.existsSync(dir)) {
+-          return { success: false, error: `Directory not found: ${args.dirPath}` };
+         }
+-        const isCaseSensitive = args.isCaseSensitive || false;
+-        const results = searchFilesHelper(dir, args.pattern, isCaseSensitive);
+-        return { success: true, results };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+       }
+-    case "web_search":
+-      try {
+-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`);
+-        const html = await response.text();
+-        const $ = cheerio.load(html);
+-        const searchResults: any[] = [];
+-        $('.result').each((i, el) => {
+-          if (i >= 5) return; // limit to 5 results
+-          const title = $(el).find('.result__title').text().trim();
+-          const snippet = $(el).find('.result__snippet').text().trim();
+-          const rawUrl = $(el).find('.result__url').attr('href') || "";
+-          
+-          let cleanUrl = rawUrl;
+-          if (cleanUrl.startsWith('//duckduckgo.com/l/?uddg=')) {
+-              cleanUrl = decodeURIComponent(cleanUrl.split('uddg=')[1].split('&')[0]);
+-          } else if (cleanUrl.startsWith('/url?q=')) {
+-              cleanUrl = decodeURIComponent(cleanUrl.split('/url?q=')[1].split('&')[0]);
+-          }
++    } else {
++      results = extractSignatures(fs.readFileSync(targetPath, "utf-8"), targetPath);
++    }
++    return { success: true, analysis: results.length === 0 ? "No structures found." : results.join('\n') };
++  }
++});
+ 
+-          if (title && cleanUrl) {
+-            searchResults.push({ title, snippet, url: cleanUrl });
+-          }
+-        });
+-        return { success: true, results: searchResults };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
++ToolRegistry.register({
++  name: "web_search",
++  description: "Searches the web using DuckDuckGo",
++  schema: z.object({ query: z.string() }),
++  execute: async (args) => {
++    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`);
++    const html = await response.text();
++    const $ = cheerio.load(html);
++    const searchResults: any[] = [];
++    $('.result').each((i, el) => {
++      if (i >= 5) return;
++      const title = $(el).find('.result__title').text().trim();
++      const snippet = $(el).find('.result__snippet').text().trim();
++      const rawUrl = $(el).find('.result__url').attr('href') || "";
++      let cleanUrl = rawUrl;
++      if (cleanUrl.startsWith('//duckduckgo.com/l/?uddg=')) {
++        cleanUrl = decodeURIComponent(cleanUrl.split('uddg=')[1].split('&')[0]);
++      } else if (cleanUrl.startsWith('/url?q=')) {
++        cleanUrl = decodeURIComponent(cleanUrl.split('/url?q=')[1].split('&')[0]);
+       }
+-    case "fetch_url":
+-      try {
+-        const response = await fetch(args.url);
+-        const html = await response.text();
+-        const $ = cheerio.load(html);
+-        
+-        // Remove useless tags
+-        $('script, style, noscript, svg, img, video, audio, iframe, nav, footer, header').remove();
+-        
+-        // Extract text and clean up whitespace
+-        const text = $('body').text().replace(/\s+/g, ' ').trim();
+-        return { success: true, text: text.substring(0, 8000) }; // limit to 8k chars to avoid token limits
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "start_background_command":
+-      try {
+-        if (backgroundProcesses[args.id]) {
+-          return { success: false, error: `A process with id '${args.id}' is already running.` };
+-        }
+-        const options = args.cwd ? { cwd: path.resolve(args.cwd), shell: true } : { shell: true };
+-        const child = spawn(args.command, [], options);
+-        
+-        backgroundProcesses[args.id] = { process: child, logs: [] };
+-        
+-        const handleOutput = (data: any) => {
+-           const lines = data.toString().split('\n');
+-           const proc = backgroundProcesses[args.id];
+-           if (proc) {
+-             proc.logs.push(...lines);
+-             if (proc.logs.length > 500) {
+-               proc.logs = proc.logs.slice(proc.logs.length - 500);
+-             }
+-           }
+-        };
++      if (title && cleanUrl) searchResults.push({ title, snippet, url: cleanUrl });
++    });
++    return { success: true, results: searchResults };
++  }
++});
+ 
+-        child.stdout?.on('data', handleOutput);
+-        child.stderr?.on('data', handleOutput);
+-        
+-        child.on('close', (code) => {
+-           const proc = backgroundProcesses[args.id];
+-           if (proc) proc.logs.push(`[Process exited with code ${code}]`);
+-        });
++ToolRegistry.register({
++  name: "fetch_url",
++  description: "Fetches a URL and extracts clean text",
++  schema: z.object({ url: z.string() }),
++  execute: async (args) => {
++    const response = await fetch(args.url);
++    const html = await response.text();
++    const $ = cheerio.load(html);
++    $('script, style, noscript, svg, img, video, audio, iframe, nav, footer, header').remove();
++    const text = $('body').text().replace(/\s+/g, ' ').trim();
++    return { success: true, text: text.substring(0, 8000) };
++  }
++});
+ 
+-        return { success: true, message: `Process '${args.id}' started successfully.` };
+-      } catch (e: any) {
+-         return { success: false, error: e.message };
+-      }
+-    case "read_process_logs":
+-      try {
+-        const proc = backgroundProcesses[args.id];
+-        if (!proc) {
+-           return { success: false, error: `No running process found with id '${args.id}'.` };
+-        }
+-        const linesToRead = args.lines || 100;
+-        const logsToReturn = proc.logs.slice(-Math.abs(linesToRead));
+-        return { success: true, logs: logsToReturn.join('\n') };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
+-      }
+-    case "stop_background_process":
+-      try {
+-        const proc = backgroundProcesses[args.id];
+-        if (!proc) {
+-           return { success: false, error: `No running process found with id '${args.id}'.` };
+-        }
+-        proc.process.kill();
+-        delete backgroundProcesses[args.id];
+-        return { success: true, message: `Process '${args.id}' stopped and removed.` };
+-      } catch (e: any) {
+-        return { success: false, error: e.message };
++ToolRegistry.register({
++  name: "start_background_command",
++  description: "Starts a background command. Returns immediately.",
++  schema: z.object({
++    command: z.string(),
++    id: z.string(),
++    cwd: z.string().optional()
++  }),
++  execute: (args) => {
++    if (backgroundProcesses[args.id]) throw new Error(`Process '${args.id}' is already running.`);
++    const options = args.cwd ? { cwd: path.resolve(args.cwd), shell: true } : { shell: true };
++    const child = spawn(args.command, [], options);
++    backgroundProcesses[args.id] = { process: child, logs: [] };
++    const handleOutput = (data: any) => {
++      const proc = backgroundProcesses[args.id];
++      if (proc) {
++        proc.logs.push(...data.toString().split('\n'));
++        if (proc.logs.length > 500) proc.logs = proc.logs.slice(-500);
+       }
+-    case "finish_task":
+-        return { success: true, message: "Task marked as completed." };
+-    default:
+-      return { success: false, error: `Tool ${toolName} not found.` };
++    };
++    child.stdout?.on('data', handleOutput);
++    child.stderr?.on('data', handleOutput);
++    child.on('close', (code) => {
++      if (backgroundProcesses[args.id]) backgroundProcesses[args.id].logs.push(`[Process exited with code ${code}]`);
++    });
++    return { success: true, message: `Process '${args.id}' started successfully.` };
+   }
+-}
++});
++
++ToolRegistry.register({
++  name: "read_process_logs",
++  description: "Reads the recent logs of a background process.",
++  schema: z.object({ id: z.string(), lines: z.number().optional().default(100) }),
++  execute: (args) => {
++    const proc = backgroundProcesses[args.id];
++    if (!proc) throw new Error(`No running process found with id '${args.id}'.`);
++    return { success: true, logs: proc.logs.slice(-Math.abs(args.lines)).join('\n') };
++  }
++});
++
++ToolRegistry.register({
++  name: "stop_background_process",
++  description: "Stops a running background process.",
++  schema: z.object({ id: z.string() }),
++  execute: (args) => {
++    const proc = backgroundProcesses[args.id];
++    if (!proc) throw new Error(`No running process found with id '${args.id}'.`);
++    proc.process.kill();
++    delete backgroundProcesses[args.id];
++    return { success: true, message: `Process '${args.id}' stopped.` };
++  }
++});
++
++ToolRegistry.register({
++  name: "finish_task",
++  description: "Call this when the task is fully completed.",
++  schema: z.object({ finalAnswer: z.string() }),
++  execute: () => {
++    return { success: true, message: "Task marked as completed." };
++  }
++});

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "sqlite": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-sqlite-server",
+        "--db",
+        ".agent_audit.db"
+      ]
+    }
+  }
+}

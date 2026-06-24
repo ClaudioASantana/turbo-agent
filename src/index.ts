@@ -1,61 +1,89 @@
-import { runAgentStep, loadHistory, clearHistory } from "./agent";
+import { Agent } from "./agent";
 import { promptUser } from "./promptUser";
 import { initLLM } from "./llmClient";
 
 import { select } from '@inquirer/prompts';
+import { findLocalManifest, loadManifest } from "./mcp/manifest";
+import { MCPClientManager } from "./mcp/client";
+import pc from "picocolors";
 
 async function main() {
-  console.log("=========================================");
-  console.log("🤖 Turbo Agent Inicializado (v2)");
-  console.log("=========================================\n");
+  console.log(pc.magenta("========================================="));
+  console.log(pc.bold(pc.cyan("🤖 Turbo Agent Inicializado (v2)")));
+  console.log(pc.magenta("=========================================\n"));
   
-  const modelOption = await select({
-    message: 'Selecione o modelo LLM a ser utilizado:',
-    choices: [
-      {
-        name: 'Qwen 3.6 35B TurboQuant (Recomendado)',
-        value: 'omniagent',
-        description: 'Modelo de uso geral, otimizado para velocidade.',
-      },
-      {
-        name: 'Qwen 2.5 Coder 14B',
-        value: 'qwen2.5-coder:14b',
-        description: 'Modelo excelente para programação e tarefas rápidas.',
-      },
-      {
-        name: 'QwQ 32B (Raciocínio Avançado)',
-        value: 'qwq',
-        description: 'Modelo da família Qwen focado em raciocínio complexo.',
-      },
-    ],
-  });
-  
-  process.env.LLM_MODEL = modelOption;
-  initLLM("http://172.24.160.1:18080/v1", "llama.cpp");
-  console.log(`-> ✅ Selecionado: ${modelOption === 'qwq' ? 'QwQ 32B' : modelOption === 'omniagent' ? 'Qwen 3.6 35B TurboQuant' : 'Qwen 2.5 Coder 14B'} (via OmniAgent)\n`);
+  // Usa a configuração do .env diretamente
+  initLLM(); 
+  console.log(`-> ✅ Selecionado: Configuração do .env (Modelo: ${process.env.LLM_MODEL || 'Claude / Custom'})\n`);
 
-  console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file");
+  console.log("Ferramentas ativas: read_file, list_files, write_file, run_command, replace_in_file, etc.");
   console.log("Comandos de chat iterativo ativados.");
   console.log("Digite 'exit' ou 'sair' para encerrar. Digite 'clear' ou 'limpar' para resetar a memória.");
   console.log("=========================================\n");
 
 
-  loadHistory();
+  // Initialize MCP Tools
+  const mcpManifestPath = findLocalManifest();
+  const mcpManager = new MCPClientManager();
+  if (mcpManifestPath) {
+    console.log(`[MCP] Manifest found at ${mcpManifestPath}`);
+    const manifest = loadManifest(mcpManifestPath);
+    if (manifest && manifest.mcpServers) {
+      for (const [name, config] of Object.entries(manifest.mcpServers)) {
+        await mcpManager.startServer(name, config);
+      }
+    }
+  } else {
+    console.log("[MCP] No manifest found.");
+  }
+
+  const agent = new Agent();
+  agent.loadHistory();
 
   while (true) {
-    const prompt = await promptUser("\nVocê: ");
+    const prompt = await promptUser("Você: ");
     
     if (prompt.trim() === "") continue;
     if (prompt.toLowerCase() === "exit" || prompt.toLowerCase() === "sair") {
       console.log("Encerrando agente...");
+      await mcpManager.closeAll();
       break;
     }
     if (prompt.toLowerCase() === "clear" || prompt.toLowerCase() === "limpar") {
-      clearHistory();
+      agent.clearHistory();
+      continue;
+    }
+    
+    if (prompt.toLowerCase().startsWith("/rewind")) {
+      const parts = prompt.split(" ");
+      const steps = parts.length > 1 ? parseInt(parts[1]) : 1;
+      if (isNaN(steps) || steps <= 0) {
+        console.log(pc.red("Uso: /rewind <numero_de_passos>"));
+        continue;
+      }
+      
+      console.log(pc.yellow(`⏱️ Voltando no tempo ${steps} passo(s)...`));
+      const success = await agent.rewindState(steps);
+      if (success) {
+         console.log(pc.green("✅ Estado revertido com sucesso! O agente esqueceu os eventos recentes."));
+      } else {
+         console.log(pc.red("❌ Não foi possível reverter. Histórico insuficiente."));
+      }
       continue;
     }
 
-    await runAgentStep(prompt);
+    const result: any = await agent.runStep(prompt);
+    
+    // Fase 1 HITL: Se pausou, pergunta pro usuário
+    if (result && result.status === 'paused') {
+      const aprovacao = await promptUser(pc.yellow("⚠️ O Arquiteto montou o plano. Deseja permitir que o Coder execute? (S/N): "));
+      if (aprovacao.trim().toLowerCase() === "s") {
+         await agent.runStep(null); // Retoma
+      } else {
+         await agent.abortPlan(); // Cancela
+         console.log(pc.red("Plano abortado."));
+      }
+    }
   }
 }
 
