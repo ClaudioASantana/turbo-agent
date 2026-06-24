@@ -564,14 +564,14 @@ export default function App() {
           {messages.map((msg) => (
             <motion.div 
                key={msg.id} 
-               initial={{ opacity: 0, y: 15, scale: 0.98 }}
+               initial={{ opacity: 0, y: 10, scale: 0.98 }}
                animate={{ opacity: 1, y: 0, scale: 1 }}
-               className={`flex flex-col mb-8 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+               className={`flex flex-col mb-6 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
             >
-              <div className="flex items-center mb-1.5 text-[10px] uppercase tracking-widest font-bold opacity-40 px-2">
-                {msg.role === 'user' ? 'Você' : msg.role === 'agent' ? 'Turbo Agent' : 'System'}
+              <div className="flex items-center mb-1 text-[10px] uppercase tracking-wider font-semibold opacity-40 px-2">
+                {msg.role === 'user' ? 'Você' : msg.role === 'agent' ? 'Agent' : 'System'}
               </div>
-              <div className={`leading-relaxed p-5 rounded-2xl max-w-[85%] shadow-xl ${msg.role === 'user' ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-tr-sm border border-indigo-500/30' : 'glass-panel rounded-tl-sm'}`}>
+              <div className={`p-4 max-w-[85%] ${msg.role === 'user' ? 'bg-white/10 text-gray-200 rounded-2xl rounded-tr-sm border border-white/5' : 'text-gray-200'}`}>
                 {msg.role === 'agent' ? (
                   <div className="prose prose-invert max-w-none prose-sm prose-pre:bg-transparent prose-pre:p-0">
                     <ReactMarkdown
@@ -669,8 +669,8 @@ export default function App() {
               }
             }}
             disabled={isProcessing || isPaused}
-            placeholder={isPaused ? "Aguardando aprovação do plano..." : "Digite sua instrução mágica ou use o áudio..."}
-            className="w-full rounded-2xl p-5 pr-24 resize-none outline-none glass-panel focus:ring-2 focus:ring-indigo-500/50 transition-all disabled:opacity-50 text-[15px] shadow-2xl placeholder-white/30"
+            placeholder={isPaused ? "Aguardando aprovação do plano..." : "Digite sua instrução ou use o áudio..."}
+            className="w-full rounded-xl p-4 pr-24 resize-none outline-none glass-panel focus:ring-1 focus:ring-white/30 transition-all disabled:opacity-50 text-sm shadow-lg placeholder-white/30"
             rows={2}
           />
           <div className="absolute right-3 bottom-4 flex items-center space-x-2">

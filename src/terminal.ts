@@ -3,22 +3,46 @@ import * as os from "os";
 import crypto from "crypto";
 
 export class PersistentTerminal {
-  private ptyProcess: pty.IPty;
+  private ptyProcess!: pty.IPty;
   private outputBuffer: string = "";
   private currentPromiseResolver: ((output: string) => void) | null = null;
   private currentMarker: string | null = null;
+  private isReady: boolean = false;
 
   constructor() {
-    const shell = os.platform() === "win32" ? "powershell.exe" : "bash";
-    this.ptyProcess = pty.spawn(shell, [], {
+    this.reinitialize(process.cwd());
+  }
+
+  public reinitialize(newCwd: string = process.cwd()) {
+    if (this.ptyProcess) {
+      try { this.ptyProcess.kill(); } catch (e) {}
+    }
+    const containerName = `turbo-agent-sandbox-${crypto.randomBytes(4).toString("hex")}`;
+    this.ptyProcess = pty.spawn("docker", [
+      "run", "-it", "--rm", 
+      "--name", containerName, 
+      "-v", `${newCwd}:/workspace`, 
+      "-w", "/workspace", 
+      "node:20", "bash"
+    ], {
       name: "xterm-color",
       cols: 80,
       rows: 30,
-      cwd: process.cwd(),
+      cwd: newCwd,
       env: process.env as Record<string, string>,
     });
 
+    this.isReady = false;
+    this.outputBuffer = "";
+    this.currentMarker = null;
+    if (this.currentPromiseResolver) {
+      this.currentPromiseResolver("Terminal reinitialized due to workspace change.");
+      this.currentPromiseResolver = null;
+    }
+
     this.ptyProcess.onData((data: string) => {
+      // DEBUG LOG
+      console.log("[PTY OUT]", JSON.stringify(data));
       this.outputBuffer += data;
       if (this.currentMarker && this.currentPromiseResolver) {
         if (this.outputBuffer.includes(this.currentMarker)) {
@@ -33,9 +57,6 @@ export class PersistentTerminal {
         }
       }
     });
-
-    // Início rápido para consumir as mensagens de login (MOTD) do shell
-    this.execute("echo 'Terminal Persistente Iniciado'");
   }
 
   /**
@@ -51,6 +72,11 @@ export class PersistentTerminal {
   public async execute(command: string, timeoutMs: number = 30000): Promise<string> {
     if (this.currentPromiseResolver) {
       throw new Error("Um comando já está sendo executado no terminal. Aguarde o término.");
+    }
+
+    if (!this.isReady) {
+      await new Promise(r => setTimeout(r, 3000)); // Aguarda 3s pro docker bootar o bash
+      this.isReady = true;
     }
 
     return new Promise((resolve, reject) => {

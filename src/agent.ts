@@ -38,16 +38,25 @@ const normalizeMessages = (msgs: BaseMessage[]) => {
        }
        
        if (normalized.length > 0 && normalized[normalized.length - 1]._getType() === msg._getType()) {
-           const prev = normalized[normalized.length - 1];
-           const prevHasTools = (prev as any).tool_calls && (prev as any).tool_calls.length > 0;
-           const currentHasTools = (msg as any).tool_calls && (msg as any).tool_calls.length > 0;
-           const isToolMsg = msg._getType() === "tool";
-           
-           if (!isToolMsg && !prevHasTools && !currentHasTools) {
-               prev.content = prev.content.toString() + "\n\n" + msg.content.toString();
-               continue;
-           }
-       }
+            const prev = normalized[normalized.length - 1];
+            const prevHasTools = (prev as any).tool_calls && (prev as any).tool_calls.length > 0;
+            const currentHasTools = (msg as any).tool_calls && (msg as any).tool_calls.length > 0;
+            const isToolMsg = msg._getType() === "tool";
+            
+            if (!isToolMsg && !prevHasTools && !currentHasTools) {
+                const newContent = prev.content.toString() + "\n\n" + msg.content.toString();
+                if (prev._getType() === "human") {
+                    normalized[normalized.length - 1] = new HumanMessage({ content: newContent, additional_kwargs: prev.additional_kwargs, id: prev.id, name: prev.name });
+                } else if (prev._getType() === "ai") {
+                    normalized[normalized.length - 1] = new AIMessage({ content: newContent, additional_kwargs: prev.additional_kwargs, tool_calls: (prev as any).tool_calls, id: prev.id, name: prev.name });
+                } else {
+                    const clonedMsg = Object.assign(Object.create(Object.getPrototypeOf(prev)), prev);
+                    clonedMsg.content = newContent;
+                    normalized[normalized.length - 1] = clonedMsg;
+                }
+                continue;
+            }
+        }
        normalized.push(msg);
    }
    
@@ -179,7 +188,8 @@ export class Agent {
       });
 
       const tools = ToolRegistry.getSchemas();
-      const chatWithTools = chat.bindTools(tools);
+      const toolsPrompt = `\nFERRAMENTAS DISPONÍVEIS:\nVocê DEVE chamar ferramentas respondendo com um JSON neste formato: {"tool": "nome", "args": { ... } }\nSchemas das ferramentas:\n` + JSON.stringify(tools, null, 2);
+      const chatWithTools = chat;
       
       const { recall } = await import("./memoryVector");
       let userPrompt = "";
@@ -195,8 +205,10 @@ export class Agent {
 
       const sysMsg = new SystemMessage(`Você é o Explorador (Agentic RAG). Entenda o pedido do usuário e vasculhe os arquivos usando list_files ou read_file para encontrar onde a mudança deve ocorrer. Quando tiver os caminhos exatos, chame finish_task reportando os caminhos encontrados.${memoryText}
 Se a tarefa for complexa, use a ferramenta list_skills para ver se há diretrizes específicas do projeto, E use list_knowledge_items para ler regras e lições aprendidas de sessões anteriores antes de seguir.
+IMPORTANTE: Você roda no sistema HOST do usuário e tem acesso irrestrito a TODOS os arquivos do computador usando read_file, list_files, etc. O seu diretório de trabalho atual (CWD) no host é: ${process.cwd()}
+Apenas a ferramenta 'run_command' roda dentro de um container Docker restrito.
 SE O USUÁRIO APENAS MANDAR UMA SAUDAÇÃO (ex: "olá"), responda amigavelmente em texto puro e NÃO chame ferramentas.
-SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notícias, cotações), VOCÊ ESTÁ ESTRITAMENTE PROIBIDO de dizer que não tem acesso. VOCÊ DEVE OBRIGATORIAMENTE chamar a ferramenta "web_search" ou "invoke_browser_subagent" para buscar a resposta no Google/DuckDuckGo antes de responder.`);
+SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notícias, cotações), VOCÊ ESTÁ ESTRITAMENTE PROIBIDO de dizer que não tem acesso. VOCÊ DEVE OBRIGATORIAMENTE chamar a ferramenta "web_search" ou "invoke_browser_subagent" para buscar a resposta no Google/DuckDuckGo antes de responder.${toolsPrompt}`);
       const cleanMessages = normalizeMessages(state.messages.filter((m: any) => m._getType() !== "system"));
       console.log("PAYLOAD MESSAGES TO LLM:", JSON.stringify([sysMsg, ...cleanMessages]));
       const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
@@ -222,6 +234,7 @@ SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notíci
         temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
         maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
         apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
+        streamUsage: false,
         maxRetries: 0,
         configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
       });
@@ -258,13 +271,16 @@ Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO us
         });
 
         const tools = ToolRegistry.getSchemas();
-        const chatWithTools = chat.bindTools(tools);
+        const toolsPrompt = `\nFERRAMENTAS DISPONÍVEIS:\nVocê DEVE usar as ferramentas respondendo com um JSON puro no formato: {"tool": "nome", "args": { ... } }\nSchemas:\n` + JSON.stringify(tools, null, 2);
+        const chatWithTools = chat;
 
         const sysMsg = new SystemMessage(`Você é o Programador (Coder) e Gerente de Sub-Agentes. Siga rigorosamente o plano que o Arquiteto acabou de traçar na última mensagem. Use as ferramentas necessárias.
+IMPORTANTE: Você roda no sistema HOST do usuário e tem acesso irrestrito a TODOS os arquivos do computador (incluindo fora do workspace) usando as ferramentas read_file, list_files, etc. O seu diretório de trabalho atual (CWD) no host é: ${process.cwd()}
+Apenas a ferramenta 'run_command' roda dentro de um container Docker isolado que só acessa o /workspace.
 SE O PLANO EXIGIR ALTERAR VÁRIOS ARQUIVOS INDEPENDENTES: Você NÃO deve alterá-los sequencialmente. Você DEVE usar a ferramenta invoke_parallel_subagents passando um array com as instruções de cada arquivo, para que seus sub-agentes os modifiquem simultaneamente. NUNCA delegue o mesmo arquivo para mais de um sub-agente.
 Sempre que for fazer grandes refatorações você mesmo, use \`preview_file_changes\` primeiro e depois use \`request_user_approval\` para perguntar se o usuário concorda, antes de usar ferramentas destrutivas de escrita.
 Toda vez que você criar ou modificar uma função/feature, você OBRIGATORIAMENTE DEVE usar a ferramenta \`invoke_subagent\` para delegar a escrita dos testes unitários para um Sub-Agente especializado (diga a ele: 'Escreva os testes em Vitest para o arquivo X'). Não escreva os testes você mesmo!
-Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIGATORIAMENTE deve chamar a ferramenta \`create_pull_request\` para efetuar o commit do código validado e enviá-lo ao GitHub. A mensagem de commit DEVE seguir o padrão Semantic Commits (feat:, fix:, chore:, refactor:, docs:, test:, style:). Só depois chame finish_task.`);
+Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIGATORIAMENTE deve chamar a ferramenta \`create_pull_request\` para efetuar o commit do código validado e enviá-lo ao GitHub. A mensagem de commit DEVE seguir o padrão Semantic Commits (feat:, fix:, chore:, refactor:, docs:, test:, style:). Só depois chame finish_task.${toolsPrompt}`);
         const cleanMessages = state.messages.filter(m => m._getType() !== "system");
         console.log("INVOKING CHATWITHTOOLS WITH:", JSON.stringify([sysMsg, ...cleanMessages])); console.log("PAYLOAD MESSAGES:", JSON.stringify([sysMsg, ...cleanMessages])); console.log("PAYLOAD MESSAGES TO LLM:", JSON.stringify([sysMsg, ...cleanMessages]));
       const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
@@ -302,6 +318,7 @@ Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIG
         temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
         maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
         apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
+        streamUsage: false,
         maxRetries: 0,
         configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
       });
@@ -558,6 +575,9 @@ Se algum teste falhar, aponte o defeito detalhadamente (copiando o erro do termi
        let printedAgentHeader: string | boolean = false;
        const streamedTokensCount: Record<string, number> = {};
        let emittedAnyToken = false;
+       
+       let totalPromptTokens = 0;
+       let totalCompletionTokens = 0;
 
        for await (const event of events) {
          if (event.event === "on_chat_model_stream") {
@@ -585,6 +605,16 @@ Se algum teste falhar, aponte o defeito detalhadamente (copiando o erro do termi
          } else if (event.event === "on_chat_model_end") {
             const msg = event.data.output;
             console.log("[DEBUG STREAM END] msg:", JSON.stringify(msg));
+            
+            // Token tracking
+            if (msg) {
+                const usage = msg.usage_metadata || (msg.response_metadata && msg.response_metadata.tokenUsage) || (msg.response_metadata && msg.response_metadata.estimatedTokenUsage);
+                if (usage) {
+                    totalPromptTokens += usage.input_tokens || usage.promptTokens || 0;
+                    totalCompletionTokens += usage.output_tokens || usage.completionTokens || 0;
+                }
+            }
+
             if (!streamedTokensCount[event.run_id] && msg && msg.content) {
                const nodeName = msg.name || "agent";
                if (!this.isSubagent && !isJson && printedAgentHeader !== nodeName) {
@@ -643,6 +673,12 @@ Se algum teste falhar, aponte o defeito detalhadamente (copiando o erro do termi
        agentEvents.emit("end");
        const result = currentState;
        await DatadogDispatcher.flush();
+
+       if (!this.isSubagent && !isJson && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
+           const tokenMsg = `\n📊 Tokens consumidos no ciclo: [Input: ${totalPromptTokens} | Output: ${totalCompletionTokens} | Total: ${totalPromptTokens + totalCompletionTokens}]\n`;
+           process.stdout.write(pc.magenta(tokenMsg));
+           agentEvents.emit("system", tokenMsg);
+       }
 
        try {
          const finalSnapshot = await this.graph.getState({ configurable: { thread_id: this.threadId } });

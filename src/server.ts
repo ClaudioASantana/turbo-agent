@@ -59,7 +59,9 @@ app.post("/api/chat", async (req, res) => {
     if (context && context.workspacePath && context.workspacePath !== process.cwd()) {
         try {
             process.chdir(context.workspacePath);
-            console.log(`[Context] Workspace atualizado para: ${context.workspacePath}`);
+            const { AgentTerminal } = require("./terminal");
+            AgentTerminal.reinitialize(context.workspacePath);
+            console.log(`[Context] Workspace atualizado para: ${context.workspacePath} e Docker reiniciado.`);
         } catch (err) {
             console.error(`[Context] Falha ao mudar diretório para ${context.workspacePath}:`, err);
         }

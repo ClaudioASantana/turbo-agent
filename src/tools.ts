@@ -251,11 +251,11 @@ ToolRegistry.register({
 
 ToolRegistry.register({
   name: "run_command",
-  description: "Executes a bash command in the persistent terminal. State (like cwd, env vars) persists. WARNING: NEVER run interactive commands (like vim, nano, less, top) or anything that requires user input, as it will freeze the agent.",
+  description: "Executes a bash command inside an isolated Docker sandbox. The sandbox ONLY has access to the project workspace mounted at '/workspace'. IMPORTANT: The agent itself and all other file tools (read_file, list_files, search_files) run on the HOST system and have full access to the user's entire computer. Only this 'run_command' tool is restricted to the sandbox. WARNING: NEVER run interactive commands (like vim).",
   dangerous: true,
   schema: z.object({
     command: z.string().describe("The terminal command to execute"),
-    cwd: z.string().optional().describe("Optional path. If provided, the terminal will CD into this dir first.")
+    cwd: z.string().optional().describe("Optional path. If provided, the terminal will CD into this dir first. Note: Project root is /workspace.")
   }),
   execute: async (args) => {
     try {
@@ -793,34 +793,6 @@ ToolRegistry.register({
   }
 });
 
-ToolRegistry.register({
-  name: "run_sandboxed_command",
-  description: "Runs a shell command inside an ephemeral Docker container. Use this to safely execute generated python code or run untrusted commands. The workspace is mounted.",
-  dangerous: true,
-  schema: z.object({
-    image: z.string().optional().describe("The docker image to use (e.g. 'python:3.10', 'node:20')"),
-    command: z.string().describe("The command to execute inside the container")
-  }),
-  execute: async (args) => {
-    try {
-      const { exec } = require('child_process');
-      const util = require('util');
-      const execAsync = util.promisify(exec);
-      
-      console.log(pc.yellow(`\n[Sandbox] Executando comando em container Docker (${args.image})...`));
-      
-      const cwd = process.cwd();
-      const safeCommand = args.command.replace(/"/g, '\\"');
-      const dockerImage = args.image ?? "node:20";
-      const dockerCommand = `docker run --rm -v "${cwd}:/workspace" -w /workspace ${dockerImage} bash -c "${safeCommand}"`;
-      
-      const { stdout, stderr } = await execAsync(dockerCommand);
-      return { success: true, stdout, stderr };
-    } catch (e: any) {
-      return { success: false, error: e.message, stderr: e.stderr };
-    }
-  }
-});
 
 ToolRegistry.register({
   name: "memorize",

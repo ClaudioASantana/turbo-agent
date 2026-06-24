@@ -125,7 +125,13 @@ export function startTelegramBot(agent: Agent) {
         }
     });
 
-    bot.launch();
+    bot.catch((err, ctx) => {
+        console.error(`[Telegram] Erro no bot para a atualização ${ctx.updateType}:`, err);
+    });
+
+    bot.launch().catch(err => {
+        console.error("[Telegram] Falha crítica ao iniciar bot (rede/timeout):", err.message);
+    });
     console.log("[Telegram] Bot iniciado e aguardando comandos!");
 
     process.once("SIGINT", () => bot.stop("SIGINT"));
