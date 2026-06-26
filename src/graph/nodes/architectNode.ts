@@ -1,30 +1,7 @@
-import { Annotation, BaseMessage, SystemMessage } from "@langchain/core";
+import { SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { CoreMemory } from "../../coreMemory";
-import pc from "picocolors";
-
-const AgentState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: (x, y) => y,
-    default: () => [],
-  }),
-  consecutiveErrors: Annotation<number>({
-    reducer: (x, y) => y,
-    default: () => 0,
-  }),
-  finalAnswer: Annotation<string | null>({
-    reducer: (x, y) => y,
-    default: () => null,
-  }),
-  context: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "",
-  }),
-  sender: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "coderNode",
-  })
-});
+import { AgentState } from "../state";
 
 export const architectNode = async (state: typeof AgentState.State, config: any) => {
   const chat = new ChatOpenAI({

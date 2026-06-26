@@ -1,30 +1,8 @@
-import { Annotation, BaseMessage, AIMessage, SystemMessage } from "@langchain/core";
+import { SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { ToolRegistry } from "../../tools";
 import { extractToolCalls } from "../../parser";
-
-const AgentState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: (x, y) => y,
-    default: () => [],
-  }),
-  consecutiveErrors: Annotation<number>({
-    reducer: (x, y) => y,
-    default: () => 0,
-  }),
-  finalAnswer: Annotation<string | null>({
-    reducer: (x, y) => y,
-    default: () => null,
-  }),
-  context: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "",
-  }),
-  sender: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "coderNode",
-  })
-});
+import { AgentState } from "../state";
 
 export const qaNode = async (state: typeof AgentState.State, config: any) => {
   if (!state.finalAnswer) return { messages: [] };

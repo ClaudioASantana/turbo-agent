@@ -1,34 +1,11 @@
-import { Annotation, BaseMessage, HumanMessage, AIMessage, SystemMessage } from "@langchain/core";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { ToolRegistry } from "../../tools";
 import { extractToolCalls } from "../../parser";
-import pc from "picocolors";
 import { Logger } from "../../logger";
+import { AgentState } from "../state";
 
-const AgentState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: (x, y) => y,
-    default: () => [],
-  }),
-  consecutiveErrors: Annotation<number>({
-    reducer: (x, y) => y,
-    default: () => 0,
-  }),
-  finalAnswer: Annotation<string | null>({
-    reducer: (x, y) => y,
-    default: () => null,
-  }),
-  context: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "",
-  }),
-  sender: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "coderNode",
-  })
-});
-
-export const coderNode = async (state: typeof AgentState.State, config: any, isSubagent: boolean = false) => {
+export const coderNode = async (state: typeof AgentState.State, config: any) => {
   try {
     const chat = new ChatOpenAI({
       modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",

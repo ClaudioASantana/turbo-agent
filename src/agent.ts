@@ -1,96 +1,55 @@
-import { StateGraph, START, END, Annotation, Send, messagesStateReducer } from "@langchain/langgraph";
+import { StateGraph, START, END } from "@langchain/langgraph";
 import { EventEmitter } from "events";
-export const agentEvents = new EventEmitter();
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { ChatOpenAI } from "@langchain/openai";
-import { BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
-import { ToolRegistry, ErrorCategory } from "./tools";
+import { HumanMessage, SystemMessage, ToolMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
+import { AgentState, normalizeMessages } from "./graph/state";
 import pc from "picocolors";
 import ora from "ora";
 import { getConfig } from "./config";
 import { Logger } from "./logger";
-import { auditToolCall, auditToolResult, logAuditEvent } from "./audit";
+import { logAuditEvent } from "./audit";
 import { buildSystemPrompt } from "./promptBuilder";
 import { HistoryManager } from "./historyManager";
-import { SecurityManager } from "./securityManager";
 import { DatadogDispatcher } from "./datadog";
-import { extractToolCalls } from "./parser";
-import { CoreMemory } from "./coreMemory";
-import { exec } from "child_process";
-import { promisify } from "util";
-const execAsync = promisify(exec);
+import { explorerNode } from "./graph/nodes/explorerNode";
+import { architectNode } from "./graph/nodes/architectNode";
+import { coderNode } from "./graph/nodes/coderNode";
+import { qaNode } from "./graph/nodes/qaNode";
+import { createToolNode } from "./graph/nodes/toolNode";
 
-// Função auxiliar para evitar erros da API do Claude agrupando mensagens consecutivas do mesmo papel
-const normalizeMessages = (msgs: BaseMessage[]) => {
-   const normalized: BaseMessage[] = [];
-   for (let msg of msgs) {
-       console.log("[DEBUG] Checking msg:", typeof msg._getType === "function" ? msg._getType() : "no-getType", msg.constructor?.name);
-       
-       // Se o proxy retornou ChatMessageChunk (sem role definida explicitamente), forçamos para AIMessage
-       if (msg._getType() === "chat" || msg._getType() === "chat_chunk" || msg._getType() === "generic" || (msg.constructor && msg.constructor.name && msg.constructor.name.includes("ChatMessage"))) {
-           console.log("[DEBUG] CONVERTING ChatMessageChunk TO AIMessage!");
-           msg = new AIMessage({
-               content: msg.content,
-               additional_kwargs: msg.additional_kwargs,
-               response_metadata: msg.response_metadata,
-               id: msg.id
-           });
-       }
-       
-       if (normalized.length > 0 && normalized[normalized.length - 1]._getType() === msg._getType()) {
-            const prev = normalized[normalized.length - 1];
-            const prevHasTools = (prev as any).tool_calls && (prev as any).tool_calls.length > 0;
-            const currentHasTools = (msg as any).tool_calls && (msg as any).tool_calls.length > 0;
-            const isToolMsg = msg._getType() === "tool";
-            
-            if (!isToolMsg && !prevHasTools && !currentHasTools) {
-                const newContent = prev.content.toString() + "\n\n" + msg.content.toString();
-                if (prev._getType() === "human") {
-                    normalized[normalized.length - 1] = new HumanMessage({ content: newContent, additional_kwargs: prev.additional_kwargs, id: prev.id, name: prev.name });
-                } else if (prev._getType() === "ai") {
-                    normalized[normalized.length - 1] = new AIMessage({ content: newContent, additional_kwargs: prev.additional_kwargs, tool_calls: (prev as any).tool_calls, id: prev.id, name: prev.name });
-                } else {
-                    const clonedMsg = Object.assign(Object.create(Object.getPrototypeOf(prev)), prev);
-                    clonedMsg.content = newContent;
-                    normalized[normalized.length - 1] = clonedMsg;
-                }
-                continue;
-            }
-        }
-       normalized.push(msg);
-   }
-   
-   // Anthropic exige que a primeira mensagem não-sistema seja do usuário.
-   // Se o histórico corrompido ou compactado começar com AI, injetamos um HumanMessage dummy.
-   if (normalized.length > 0 && normalized[0]._getType() === "ai") {
-       normalized.unshift(new HumanMessage("Continuando o contexto anterior da sessão..."));
-   }
-   
-   return normalized;
+export const agentEvents = new (require("events").EventEmitter)();
+
+
+const END_PLACEHOLDER = END;
+
+const routeFromExplorer = (state: typeof AgentState.State) => {
+  const lastMessage = state.messages[state.messages.length - 1] as any;
+  if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
+  if (state.context) return "architectNode";
+  return END_PLACEHOLDER;
 };
 
-const AgentState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: messagesStateReducer,
-    default: () => [],
-  }),
-  consecutiveErrors: Annotation<number>({
-    reducer: (x, y) => y, // Sobrescreve com o valor mais recente
-    default: () => 0,
-  }),
-  finalAnswer: Annotation<string | null>({
-    reducer: (x, y) => y,
-    default: () => null,
-  }),
-  context: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "",
-  }),
-  sender: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "coderNode",
-  })
-});
+const routeFromArchitect = (_state: typeof AgentState.State) => "coderNode";
+
+const routeFromCoder = (state: typeof AgentState.State) => {
+  if (state.consecutiveErrors >= 3) return END_PLACEHOLDER;
+  const lastMessage = state.messages[state.messages.length - 1] as any;
+  if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
+  if (state.finalAnswer) return "qaNode";
+  return END_PLACEHOLDER;
+};
+
+const routeFromTools = (state: typeof AgentState.State) => {
+  if (state.sender === "qaNode") return "qaNode";
+  return state.sender === "explorerNode" ? "explorerNode" : "coderNode";
+};
+
+const routeFromQA = (state: typeof AgentState.State) => {
+  const lastMessage = state.messages[state.messages.length - 1] as any;
+  if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
+  if (!state.finalAnswer) return "coderNode";
+  return END_PLACEHOLDER;
+};
 
 export class Agent {
   public historyManager: HistoryManager;
@@ -169,299 +128,7 @@ export class Agent {
   }
 
   private buildGraph() {
-    // 0. Explorer Node: Mapeia o repositório (Agentic RAG)
-    const explorerNode = async (state: typeof AgentState.State, config: any) => {
-      // Se ele já finalizou a exploração
-      if (state.finalAnswer && state.sender === "explorerNode") {
-         return { context: state.finalAnswer, finalAnswer: null, sender: "architectNode" };
-      }
-
-      const chat = new ChatOpenAI({
-        modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
-        temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
-        maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
-        apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
-        streamUsage: false,
-        maxRetries: 0,
-        streaming: true,
-        configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
-      });
-
-      const tools = ToolRegistry.getSchemas();
-      const toolsPrompt = `\nFERRAMENTAS DISPONÍVEIS:\nVocê DEVE chamar ferramentas respondendo com um JSON neste formato: {"tool": "nome", "args": { ... } }\nSchemas das ferramentas:\n` + JSON.stringify(tools, null, 2);
-      const chatWithTools = chat;
-      
-      const { recall } = await import("./memoryVector");
-      let userPrompt = "";
-      for (let i = state.messages.length - 1; i >= 0; i--) {
-         if (state.messages[i]._getType() === "human") {
-            const content = state.messages[i].content;
-            userPrompt = typeof content === 'string' ? content : (Array.isArray(content) ? content.map((c:any) => c.text || '').join('') : JSON.stringify(content));
-            break;
-         }
-      }
-      const pastMemories = userPrompt ? await recall(userPrompt, 3, 0.25) : [];
-      const memoryText = pastMemories.length > 0 ? `\nMEMÓRIAS PASSADAS RELEVANTES AO CONTEXTO:\n- ${pastMemories.join('\n- ')}\n` : "";
-
-      const sysMsg = new SystemMessage(`Você é o Explorador (Agentic RAG). Entenda o pedido do usuário e vasculhe os arquivos usando list_files ou read_file para encontrar onde a mudança deve ocorrer. Quando tiver os caminhos exatos, chame finish_task reportando os caminhos encontrados.${memoryText}
-Se a tarefa for complexa, use a ferramenta list_skills para ver se há diretrizes específicas do projeto, E use list_knowledge_items para ler regras e lições aprendidas de sessões anteriores antes de seguir.
-IMPORTANTE: Você roda no sistema HOST do usuário e tem acesso irrestrito a TODOS os arquivos do computador usando read_file, list_files, etc. O seu diretório de trabalho atual (CWD) no host é: ${process.cwd()}
-Apenas a ferramenta 'run_command' roda dentro de um container Docker restrito.
-SE O USUÁRIO APENAS MANDAR UMA SAUDAÇÃO (ex: "olá"), responda amigavelmente em texto puro e NÃO chame ferramentas.
-SE O USUÁRIO FIZER UMA PERGUNTA QUE EXIGE DADOS DA INTERNET (ex: clima, notícias, cotações), VOCÊ ESTÁ ESTRITAMENTE PROIBIDO de dizer que não tem acesso. VOCÊ DEVE OBRIGATORIAMENTE chamar a ferramenta "web_search" ou "invoke_browser_subagent" para buscar a resposta no Google/DuckDuckGo antes de responder.${toolsPrompt}`);
-      const cleanMessages = normalizeMessages(state.messages.filter((m: any) => m._getType() !== "system"));
-      console.log("PAYLOAD MESSAGES TO LLM:", JSON.stringify([sysMsg, ...cleanMessages]));
-      const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
-      console.log("[DEBUG EXPLORER] RAW RESPONSE:", JSON.stringify(response));
-      response.name = "explorer";
-
-      if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
-          const extracted = extractToolCalls(response.content.toString());
-          if (extracted && extracted.length > 0) response.tool_calls = extracted;
-      }
-
-      if (!response.content && (!response.tool_calls || response.tool_calls.length === 0)) {
-          response.content = "⚠️ O proxy do LLM retornou uma resposta vazia ou corrompida. Por favor, tente novamente.";
-      }
-
-      return { messages: [response], sender: "explorerNode" };
-    };
-
-    // 1. Architect Node: Planejamento inicial
-    const architectNode = async (state: typeof AgentState.State, config: any) => {
-      const chat = new ChatOpenAI({
-        modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
-        temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
-        maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
-        apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
-        streamUsage: false,
-        maxRetries: 0,
-        configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
-      });
-      
-      const memoryRules = CoreMemory.getRules();
-      const coreRulesText = memoryRules.length > 0 ? `\nRegras Permanentes a Respeitar:\n- ${memoryRules.join('\n- ')}` : '';
-
-      const sysMsg = new SystemMessage(`Você é o Arquiteto de Software. 
-Contexto encontrado pelo explorador sobre o repositório: ${state.context || 'Nenhum'}.${coreRulesText}
-Se a tarefa for complexa, considere usar a ferramenta list_skills para ver se há regras ou diretrizes a seguir no projeto antes de planejar.
-Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO use ferramentas de escrita de código. Formate explicitamente cada passo começando com "Passo 1:", "Passo 2:", etc.`);
-      
-      const cleanMessages = state.messages.filter(m => m._getType() !== "system");
-      console.log("INVOKING CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages])); const response = await chat.invoke([sysMsg, ...cleanMessages], config);
-      response.name = "architect";
-
-      return { messages: [response], sender: "architectNode" };
-    };
-
-    // 2. Coder Node: O LLM original que tem acesso às ferramentas
-    const coderNode = async (state: typeof AgentState.State, config: any) => {
-      try {
-        const chat = new ChatOpenAI({
-          modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
-          temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
-          maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
-          apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
-        streamUsage: false,
-        maxRetries: 0,
-        streaming: true,
-          configuration: {
-            baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1"
-          }
-        });
-
-        const tools = ToolRegistry.getSchemas();
-        const toolsPrompt = `\nFERRAMENTAS DISPONÍVEIS:\nVocê DEVE usar as ferramentas respondendo com um JSON puro no formato: {"tool": "nome", "args": { ... } }\nSchemas:\n` + JSON.stringify(tools, null, 2);
-        const chatWithTools = chat;
-
-        const sysMsg = new SystemMessage(`Você é o Programador (Coder) e Gerente de Sub-Agentes. Siga rigorosamente o plano que o Arquiteto acabou de traçar na última mensagem. Use as ferramentas necessárias.
-IMPORTANTE: Você roda no sistema HOST do usuário e tem acesso irrestrito a TODOS os arquivos do computador (incluindo fora do workspace) usando as ferramentas read_file, list_files, etc. O seu diretório de trabalho atual (CWD) no host é: ${process.cwd()}
-Apenas a ferramenta 'run_command' roda dentro de um container Docker isolado que só acessa o /workspace.
-SE O PLANO EXIGIR ALTERAR VÁRIOS ARQUIVOS INDEPENDENTES: Você NÃO deve alterá-los sequencialmente. Você DEVE usar a ferramenta invoke_parallel_subagents passando um array com as instruções de cada arquivo, para que seus sub-agentes os modifiquem simultaneamente. NUNCA delegue o mesmo arquivo para mais de um sub-agente.
-Sempre que for fazer grandes refatorações você mesmo, use \`preview_file_changes\` primeiro e depois use \`request_user_approval\` para perguntar se o usuário concorda, antes de usar ferramentas destrutivas de escrita.
-Toda vez que você criar ou modificar uma função/feature, você OBRIGATORIAMENTE DEVE usar a ferramenta \`invoke_subagent\` para delegar a escrita dos testes unitários para um Sub-Agente especializado (diga a ele: 'Escreva os testes em Vitest para o arquivo X'). Não escreva os testes você mesmo!
-Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIGATORIAMENTE deve chamar a ferramenta \`create_pull_request\` para efetuar o commit do código validado e enviá-lo ao GitHub. A mensagem de commit DEVE seguir o padrão Semantic Commits (feat:, fix:, chore:, refactor:, docs:, test:, style:). Só depois chame finish_task.${toolsPrompt}`);
-        const cleanMessages = state.messages.filter(m => m._getType() !== "system");
-        console.log("INVOKING CHATWITHTOOLS WITH:", JSON.stringify([sysMsg, ...cleanMessages])); console.log("PAYLOAD MESSAGES:", JSON.stringify([sysMsg, ...cleanMessages])); console.log("PAYLOAD MESSAGES TO LLM:", JSON.stringify([sysMsg, ...cleanMessages]));
-      const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
-        response.name = "coder";
-
-        // Parser Híbrido: Se o modelo falhar na API nativa e cuspir texto puro
-        if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
-            const extracted = extractToolCalls(response.content.toString());
-            if (extracted && extracted.length > 0) {
-               response.tool_calls = extracted;
-            }
-        }
-
-        if (!response.content && (!response.tool_calls || response.tool_calls.length === 0)) {
-            response.content = "⚠️ O proxy do LLM retornou uma resposta vazia ou corrompida no Coder. Por favor, verifique o provedor.";
-        }
-
-        return { messages: [response], sender: "coderNode" };
-      } catch (error: any) {
-        Logger.error(`Erro na API do LLM (Coder): ${error.message}`);
-        return { 
-          messages: [new HumanMessage(`Erro de API ao chamar o modelo: ${error.message}. Verifique a conexão.`)],
-          consecutiveErrors: state.consecutiveErrors + 1
-        };
-      }
-    };
-
-    // 3. QA Node: Avalia a resposta antes de enviar ao usuário
-    const qaNode = async (state: typeof AgentState.State, config: any) => {
-      // QA só age se o Coder disse que acabou
-      if (!state.finalAnswer) return { messages: [] };
-
-      const chat = new ChatOpenAI({
-        modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
-        temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
-        maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
-        apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
-        streamUsage: false,
-        maxRetries: 0,
-        configuration: { baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1" }
-      });
-      
-      const sysMsg = new SystemMessage(`Você é o Revisor de Qualidade (QA). O Coder declarou que finalizou a tarefa com a resposta: "${state.finalAnswer}". 
-Antes de aprovar, você OBRIGATORIAMENTE DEVE usar a ferramenta \`run_unit_tests\` para verificar se a suíte de testes do projeto passou.
-Se os testes passarem perfeitamente, responda estritamente a palavra "APROVADO". 
-Se algum teste falhar, aponte o defeito detalhadamente (copiando o erro do terminal) para o Coder corrigir.`);
-      
-      const tools = ToolRegistry.getSchemas();
-      const chatWithTools = chat.bindTools(tools);
-
-      const cleanMessages = state.messages.filter(m => m._getType() !== "system");
-      console.log("INVOKING QA CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages]));
-      const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
-      response.name = "qa";
-
-      if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
-          const extracted = extractToolCalls(response.content.toString());
-          if (extracted && extracted.length > 0) {
-             response.tool_calls = extracted;
-          }
-      }
-
-      if (response.content && response.content.toString().includes("APROVADO")) {
-         return { messages: [response], sender: "qaNode" };
-      } else if (response.tool_calls && response.tool_calls.length > 0) {
-         return { messages: [response], sender: "qaNode" };
-      } else {
-         return { messages: [response], finalAnswer: null, sender: "qaNode" }; 
-      }
-    };
-
-    // Tool Node: Executa a ferramenta e faz o Self-Healing
-    const toolNode = async (state: typeof AgentState.State) => {
-      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-      const toolCalls = lastMessage.tool_calls || [];
-      const newMessages: BaseMessage[] = [];
-      let currentErrors = 0;
-      let finalAnswer: string | null = null;
-
-      for (const call of toolCalls) {
-        const toolName = call.name;
-        const args = call.args;
-
-        if (toolName === "finish_task") {
-          finalAnswer = args.finalAnswer || 'Concluído';
-          if (!this.isSubagent) {
-             console.log(pc.green(`\n🤖 Turbo-Agent Finalizou:\n${finalAnswer}\n`));
-          }
-          newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: "Task finished." }));
-          continue;
-        }
-
-        if (!this.isSubagent) {
-           console.log(pc.yellow(`\n🔧 Executando ferramenta nativa: ${toolName}`));
-        }
-
-        // Security
-        const auth = await SecurityManager.authorize(toolName, args, this.isSubagent);
-        if (!auth.approved) {
-           newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: auth.userMessage }));
-           currentErrors++;
-           continue;
-        }
-
-        auditToolCall(toolName, args);
-        let toolResult = await ToolRegistry.execute(toolName, args);
-
-        // Self-Healing TypeScript
-        const writeTools = ["write_file", "replace_in_file", "patch_file", "multi_replace_in_file"];
-        if (toolResult.success && writeTools.includes(toolName)) {
-           try {
-             await execAsync("npx tsc --noEmit");
-           } catch (e: any) {
-             toolResult.success = false;
-             toolResult.category = ErrorCategory.EXECUTION;
-             toolResult.error = `O arquivo foi salvo, mas a compilação falhou:\n${e.stdout || e.message}`;
-           }
-        }
-
-        auditToolResult(toolName, JSON.stringify(toolResult));
-
-        let resultString = JSON.stringify(toolResult);
-        if (resultString.length > 3000) {
-           resultString = resultString.substring(0, 3000) + "\n... [Saída truncada]";
-        }
-
-        if (!toolResult.success) {
-           currentErrors++;
-           const errorMsg = `Tool failed:\n${resultString}\n\n[SELF-HEALING]: Analise o erro, corrija os argumentos e tente novamente. Tentativa ${state.consecutiveErrors + 1} de 3.`;
-           newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: errorMsg }));
-        } else {
-           newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: resultString }));
-        }
-      }
-
-      return { 
-        messages: newMessages, 
-        consecutiveErrors: currentErrors > 0 ? state.consecutiveErrors + 1 : 0,
-        finalAnswer
-      };
-    };
-
-    // Lógica de Roteamento (Edges)
-    const routeFromExplorer = (state: typeof AgentState.State) => {
-      // Se chamou ferramenta (ex: list_files)
-      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
-      
-      // Se terminou de explorar (reportou finalAnswer via finish_task)
-      if (state.context) return "architectNode";
-      return END; // Se for apenas uma conversa direta sem ferramentas, encerra o ciclo.
-    };
-
-    const routeFromArchitect = (state: typeof AgentState.State) => {
-      return "coderNode";
-    };
-
-    const routeFromCoder = (state: typeof AgentState.State) => {
-      if (state.consecutiveErrors >= 3) return END; // Circuit Breaker
-      
-      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-      // Se ele chamou ferramentas, vai pro Node Tools
-      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
-      
-      if (state.finalAnswer) return "qaNode";
-      return END; 
-    };
-
-    const routeFromTools = (state: typeof AgentState.State) => {
-      if (state.sender === "qaNode") return "qaNode";
-      return state.sender === "explorerNode" ? "explorerNode" : "coderNode";
-    };
-
-    const routeFromQA = (state: typeof AgentState.State) => {
-      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-      if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
-
-      // Se o QA anulou o finalAnswer, significa que ele reprovou e quer que o Coder refaça.
-      if (!state.finalAnswer) return "coderNode";
-      return END;
-    };
+    const toolNode = createToolNode(this.isSubagent);
 
     const workflow = new StateGraph(AgentState)
       .addNode("explorerNode", explorerNode)

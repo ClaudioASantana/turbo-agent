@@ -1,32 +1,8 @@
-import { StateGraph, Annotation, BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/langchain";
+import { BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { ToolRegistry } from "../../tools";
 import { extractToolCalls } from "../../parser";
-import { normalizeMessages } from "../../agent";
-import pc from "picocolors";
-
-const AgentState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: (x, y) => y,
-    default: () => [],
-  }),
-  consecutiveErrors: Annotation<number>({
-    reducer: (x, y) => y,
-    default: () => 0,
-  }),
-  finalAnswer: Annotation<string | null>({
-    reducer: (x, y) => y,
-    default: () => null,
-  }),
-  context: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "",
-  }),
-  sender: Annotation<string>({
-    reducer: (x, y) => y,
-    default: () => "coderNode",
-  })
-});
+import { normalizeMessages, AgentState } from "../state";
 
 export const explorerNode = async (state: typeof AgentState.State, config: any) => {
   if (state.finalAnswer && state.sender === "explorerNode") {
