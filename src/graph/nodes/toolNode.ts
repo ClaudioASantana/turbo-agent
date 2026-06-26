@@ -1,12 +1,10 @@
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
-import { ToolRegistry, ErrorCategory } from "../../tools";
+import { ToolRegistry } from "../../tools";
 import { SecurityManager } from "../../securityManager";
 import { auditToolCall, auditToolResult } from "../../audit";
-import { exec } from "child_process";
-import { promisify } from "util";
 import pc from "picocolors";
-
-const execAsync = promisify(exec);
+import { validateBuildAfterWrite } from "./buildValidator";
+import { buildSelfHealMessage, truncateResult } from "../utils";
 
 export const createToolNode = (isSubagent: boolean) => {
   return async (state: any) => {
@@ -42,28 +40,15 @@ export const createToolNode = (isSubagent: boolean) => {
 
       auditToolCall(toolName, args);
       let toolResult = await ToolRegistry.execute(toolName, args);
-
-      const writeTools = ["write_file", "replace_in_file", "patch_file", "multi_replace_in_file"];
-      if (toolResult.success && writeTools.includes(toolName)) {
-        try {
-          await execAsync("npx tsc --noEmit");
-        } catch (e: any) {
-          toolResult.success = false;
-          toolResult.category = ErrorCategory.EXECUTION;
-          toolResult.error = `O arquivo foi salvo, mas a compilação falhou:\n${e.stdout || e.message}`;
-        }
-      }
+      toolResult = await validateBuildAfterWrite(toolName, toolResult, isSubagent);
 
       auditToolResult(toolName, JSON.stringify(toolResult));
 
-      let resultString = JSON.stringify(toolResult);
-      if (resultString.length > 3000) {
-        resultString = resultString.substring(0, 3000) + "\n... [Saída truncada]";
-      }
+      const resultString = truncateResult(JSON.stringify(toolResult));
 
       if (!toolResult.success) {
         currentErrors++;
-        const errorMsg = `Tool failed:\n${resultString}\n\n[SELF-HEALING]: Analise o erro, corrija os argumentos e tente novamente. Tentativa ${state.consecutiveErrors + 1} de 3.`;
+        const errorMsg = buildSelfHealMessage(resultString, state.consecutiveErrors + 1);
         newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: errorMsg }));
       } else {
         newMessages.push(new ToolMessage({ tool_call_id: call.id || "0", name: toolName, content: resultString }));
