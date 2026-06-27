@@ -37,7 +37,7 @@ export interface AgentConfig {
 }
 
 const DEFAULTS: AgentConfig = {
-  maxIterations: 256,
+  maxIterations: 32,
   maxMessages: 20,
   auditLog: true,
   auditLogPath: ".agent_audit.log",

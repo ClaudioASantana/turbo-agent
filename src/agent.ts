@@ -1,55 +1,15 @@
-import { StateGraph, START, END } from "@langchain/langgraph";
-import { EventEmitter } from "events";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { HumanMessage, SystemMessage, ToolMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
-import { AgentState, normalizeMessages } from "./graph/state";
-import pc from "picocolors";
-import ora from "ora";
-import { getConfig } from "./config";
-import { Logger } from "./logger";
-import { logAuditEvent } from "./audit";
 import { buildSystemPrompt } from "./promptBuilder";
 import { HistoryManager } from "./historyManager";
 import { DatadogDispatcher } from "./datadog";
-import { explorerNode } from "./graph/nodes/explorerNode";
-import { architectNode } from "./graph/nodes/architectNode";
-import { coderNode } from "./graph/nodes/coderNode";
-import { qaNode } from "./graph/nodes/qaNode";
-import { createToolNode } from "./graph/nodes/toolNode";
+import { createAgentGraph } from "./graph/builder";
+import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { HumanMessage, SystemMessage, ToolMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
+import pc from "picocolors";
+import { getConfig } from "./config";
+import { Logger } from "./logger";
+import { logAuditEvent } from "./audit";
 
 export const agentEvents = new (require("events").EventEmitter)();
-
-
-const END_PLACEHOLDER = END;
-
-const routeFromExplorer = (state: typeof AgentState.State) => {
-  const lastMessage = state.messages[state.messages.length - 1] as any;
-  if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
-  if (state.context) return "architectNode";
-  return END_PLACEHOLDER;
-};
-
-const routeFromArchitect = (_state: typeof AgentState.State) => "coderNode";
-
-const routeFromCoder = (state: typeof AgentState.State) => {
-  if (state.consecutiveErrors >= 3) return END_PLACEHOLDER;
-  const lastMessage = state.messages[state.messages.length - 1] as any;
-  if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
-  if (state.finalAnswer) return "qaNode";
-  return END_PLACEHOLDER;
-};
-
-const routeFromTools = (state: typeof AgentState.State) => {
-  if (state.sender === "qaNode") return "qaNode";
-  return state.sender === "explorerNode" ? "explorerNode" : "coderNode";
-};
-
-const routeFromQA = (state: typeof AgentState.State) => {
-  const lastMessage = state.messages[state.messages.length - 1] as any;
-  if (lastMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) return "tools";
-  if (!state.finalAnswer) return "coderNode";
-  return END_PLACEHOLDER;
-};
 
 export class Agent {
   public historyManager: HistoryManager;
@@ -78,7 +38,7 @@ export class Agent {
 
     this.checkpointer = SqliteSaver.fromConnString(".langgraph_memory.db");
     this.threadId = `session_${Date.now()}`;
-    this.graph = this.buildGraph();
+    this.graph = createAgentGraph(this.isSubagent, this.checkpointer);
   }
 
   // Métodos de histórico mantidos para compatibilidade
@@ -124,32 +84,6 @@ export class Agent {
       }
 
       return { role, content };
-    });
-  }
-
-  private buildGraph() {
-    const toolNode = createToolNode(this.isSubagent);
-
-    const workflow = new StateGraph(AgentState)
-      .addNode("explorerNode", explorerNode)
-      .addNode("architectNode", architectNode)
-      .addNode("coderNode", coderNode)
-      .addNode("qaNode", qaNode)
-      .addNode("tools", toolNode)
-      
-      .addEdge(START, "explorerNode")
-      
-      .addConditionalEdges("explorerNode", routeFromExplorer)
-      .addConditionalEdges("architectNode", routeFromArchitect)
-      
-      .addConditionalEdges("coderNode", routeFromCoder)
-      .addConditionalEdges("tools", routeFromTools)
-      
-      .addConditionalEdges("qaNode", routeFromQA);
-
-    return workflow.compile({ 
-      checkpointer: this.checkpointer,
-      interruptBefore: this.isSubagent ? [] : ["coderNode"]
     });
   }
 

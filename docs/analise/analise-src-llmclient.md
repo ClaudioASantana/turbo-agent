@@ -1,43 +1,47 @@
 # Análise de `src/llmClient.ts`
 
+> Atualizado em: 26/06/2026 — Baseado na leitura direta do código-fonte atual.
+
 ## Visão geral
+
 `src/llmClient.ts` é o bootstrap do cliente OpenAI usado pelo Turbo-Agent. Ele decide qual base URL e qual chave de API serão usadas para falar com o modelo.
 
-## Bloco 1 — Imports e estado global
-- Importa `OpenAI`.
-- Carrega variáveis de ambiente via `dotenv/config`.
+## Responsabilidades
+
+### 1. Inicialização do cliente
+- Importa `OpenAI` e carrega variáveis de ambiente via `dotenv/config`.
 - Expõe `openai` como variável global inicializada depois.
 
-**Responsabilidade:** fornecer um cliente reutilizável para o restante da aplicação.
-
-## Bloco 2 — `initLLM()`
-- Recebe `baseURL` e `apiKey` opcionais.
-- Detecta quando deve usar a API oficial da OpenAI.
-- Se não estiver nesse modo, escolhe base URL nesta ordem:
+### 2. Função `initLLM(baseURL?, apiKey?)`
+- Decide se deve usar a API oficial da OpenAI (quando `OPENAI_API_KEY` está definida sem `LLM_BASE_URL`).
+- Determina a `baseURL` na ordem:
   1. argumento `baseURL`
   2. `process.env.LLM_BASE_URL`
-  3. fallback fixo `http://172.24.160.1:18080/v1`
-- A chave segue esta ordem:
+  3. `undefined` (usa API oficial da OpenAI)
+- Determina a `apiKey` na ordem:
   1. argumento `apiKey`
-  2. `OPENAI_API_KEY`
-  3. `LLM_API_KEY`
-  4. `OPENROUTER_API_KEY`
-  5. fallback literal `llama.cpp`
-
-**Responsabilidade:** resolver o provedor de LLM e sua autenticação.
+  2. `process.env.OPENAI_API_KEY`
+  3. `process.env.LLM_API_KEY`
+  4. `process.env.OPENROUTER_API_KEY`
+  5. `"llama.cpp"` (placeholder para modelos locais)
 
 ## Onde está a complexidade
-- A seleção de provedor depende de combinação de argumentos e variáveis de ambiente.
-- Há um fallback de base URL hardcoded.
-- A lógica é pequena, mas muito central: qualquer erro aqui afeta CLI, servidor e agentes.
+
+A lógica de escolha do provedor depende de combinações de argumentos e variáveis de ambiente. No entanto, a implementação atual já evoluiu:
+
+- **Não há mais IP fixo hardcoded em produção** — o fallback agora é `undefined`, o que força o uso da API oficial quando disponível.
+- O placeholder `"llama.cpp"` funciona como fallback final para modelos locais.
 
 ## Sinais de risco
-- O fallback para `http://172.24.160.1:18080/v1` é rígido e pode quebrar fora do ambiente esperado.
-- O uso de `llama.cpp` como apiKey default é um placeholder estranho; funciona como fallback, mas pode mascarar configuração ausente.
-- A decisão entre OpenAI oficial e base local é implícita demais para um componente tão crítico.
+
+- Ainda há uma certa complexidade na lógica de fallback, o que pode confundir em ambientes híbridos.
+- Em ambientes de teste, o IP `127.0.0.1:2099/v1` ainda aparece em arquivos como `tests-scratch/`.
 
 ## Leitura prática
-Esse arquivo é simples, mas é um ponto de configuração sensível. Vale mantê-lo pequeno e bem previsível.
+
+Arquivo enxuto e bem simples. A evolução recente tornou a lógica mais explícita e compatível com diferentes provedores.
 
 ## Resumo em uma frase
-`src/llmClient.ts` centraliza a escolha do provedor LLM, mas usa defaults que denunciam forte acoplamento ao ambiente local.
+
+`src/llmClient.ts` centraliza a escolha do provedor LLM de forma clara e flexível, com suporte a OpenAI, OpenRouter e modelos locais.
+

@@ -1,68 +1,65 @@
 # Análise de `src/index.ts`
 
-## Visão geral
-`src/index.ts` é o ponto de entrada do modo CLI do Turbo-Agent. Ele inicializa o LLM, carrega MCP se existir manifesto local, cria a instância do agente e entra em um loop interativo no terminal.
+> Atualizado em: 26/06/2026 — Baseado na leitura direta do código-fonte atual.
 
-## Bloco 1 — Boot do CLI
+## Visão geral
+
+`src/index.ts` é o ponto de entrada do modo CLI do Turbo-Agent. Ele inicializa o LLM, carrega o manifesto MCP (se houver), cria a instância do agente e entra em um loop interativo no terminal.
+
+## Responsabilidades
+
+### 1. Boot do CLI
 - Imprime banner e mensagens iniciais.
-- Chama `initLLM()` usando configuração do `.env`.
+- Inicializa o LLM via `initLLM()` (usa variáveis de ambiente).
 - Exibe o modelo selecionado.
 
-**Responsabilidade:** preparar a sessão interativa e o cliente LLM.
+### 2. Inicialização do MCP
+- Procura manifesto local (`mcp.json`).
+ Se existir, carrega o manifesto e inicia cada servidor MCP via `MCPClientManager`.
+ Caso contrário, apenas informa que não encontrou manifesto.
 
-## Bloco 2 — Inicialização MCP
-- Procura um manifesto local com `findLocalManifest()`.
-- Se existir, carrega o manifesto e sobe cada servidor MCP com `MCPClientManager`.
-- Se não existir, apenas informa que não encontrou manifesto.
-
-**Responsabilidade:** conectar ferramentas externas antes do loop principal.
-
-## Bloco 3 — Instância do agente
+### 3. Instância do agente
 - Cria `new Agent()`.
-- Chama `agent.loadHistory()`.
+- Carrega o histórico salvo (`.agent_history.json`).
 
-**Responsabilidade:** preparar estado e memória da sessão.
-
-## Bloco 4 — Loop interativo
-- Lê prompts com `promptUser("Você: ")`.
+### 4. Loop interativo
+- Lê prompt com `promptUser("Você: ")`.
 - Ignora entradas vazias.
-- `exit`/`sair` encerram a sessão e fecham MCP.
-- `clear`/`limpar` apagam o histórico.
+- Comandos `exit`/`sair` encerram sessão e fecham conexões MCP.
+- `clear`/`limpar` apagam o histórico salvo.
 
-**Responsabilidade:** receber e tratar comandos do usuário.
+### 5. Comando `/rewind`
+- Intercepta entradas que começam com `/rewind <n>`.
+- Valida o número de passos (deve ser inteiro positivo).
+- Chama `agent.rewindState(steps)` para retroceder estado.
+- Mostra mensagem de sucesso ou falha.
 
-## Bloco 5 — Comando `/rewind`
-- Intercepta `/rewind <n>`.
-- Valida o número de passos.
-- Chama `agent.rewindState(steps)`.
-- Mostra sucesso ou falha.
-
-**Responsabilidade:** permitir retroceder o estado da conversa.
-
-## Bloco 6 — Execução do agente
+### 6. Execução do agente
 - Para prompts normais, chama `agent.runStep(prompt)`.
-- Se a execução pausar para aprovação, pede confirmação explícita.
-- Se o usuário aprovar, retoma com `runStep(null)`.
-- Se não aprovar, chama `abortPlan()`.
-
-**Responsabilidade:** orquestrar execução e HITL no terminal.
+- Se o resultado indicar pausa (`status: 'paused'`), solicita confirmação explícita do usuário.
+- Se o usuário aprovar, retoma com `agent.runStep(null)`.
+- Se o usuário negar, chama `agent.abortPlan()`.
 
 ## Onde está a complexidade
-- O arquivo é curto, mas coordena várias responsabilidades:
-  - bootstrap do LLM;
-  - bootstrap MCP;
-  - ciclo interativo;
-  - controle de histórico;
-  - rewind;
-  - aprovação humana.
+
+O arquivo é pequeno, mas coordena várias responsabilidades:
+- bootstrap do LLM (`initLLM()`);
+- bootstrap do MCP (`MCPClientManager`);
+- loop interativo com `promptUser`;
+- controle de histórico (`loadHistory`, `clearHistory`);
+- comando `/rewind`;
+- lógica de aprovação humana (HITL) baseada no retorno de `runStep()`.
 
 ## Sinais de risco
-- `index.ts` depende bastante de efeitos colaterais globais do `Agent` e do MCP manager.
-- O CLI trata comandos especiais inline, o que pode crescer com novas funcionalidades.
-- A lógica de aprovação está acoplada ao retorno de `runStep()`.
+
+- `index.ts` depende de efeitos colaterais globais do objeto `Agent` e do `MCPClientManager`.
+- O CLI trata comandos especiais inline (`/rewind`, `exit`, `clear`), o que pode crescer com novas funcionalidades.
+- A lógica de aprovação humana está acoplada ao retorno de `runStep()` (verificação de `status === 'paused'`).
 
 ## Leitura prática
-É um arquivo de entrada bem enxuto e razoavelmente saudável. A maior parte da complexidade real está no `Agent`; aqui o foco é coordenação.
+
+É um arquivo de entrada enxuto e razoavelmente saudável. A maior parte da complexidade real está no `Agent`; aqui o foco é apenas coordenação de inicialização e loop.
 
 ## Resumo em uma frase
+
 `src/index.ts` é o controlador do modo CLI: simples na superfície, mas amarrado ao bootstrap do agente, MCP e ao fluxo de aprovação humana.

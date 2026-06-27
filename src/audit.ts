@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig } from "./config";
 import sqlite3 from "sqlite3";
+import { redactSecretsInText } from "./secretsDetector";
 
 export type AuditEventType =
   | "tool_call"
@@ -40,6 +41,7 @@ function initDb() {
     if (err) {
       console.warn(`[audit] Failed to open audit db: ${err.message}`);
     } else {
+      db!.run("PRAGMA journal_mode = WAL;");
       db!.run(`CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp TEXT,
@@ -188,8 +190,10 @@ function sanitizeArgs(args: Record<string, unknown>): Record<string, unknown> {
   for (const [k, v] of Object.entries(args)) {
     if (sensitiveKeys.test(k)) {
       result[k] = "[REDACTED]";
-    } else if (typeof v === "string" && v.length > 200) {
-      result[k] = v.slice(0, 200) + "...[truncated]";
+    } else if (typeof v === "string") {
+      let safeStr = redactSecretsInText(v);
+      if (safeStr.length > 200) safeStr = safeStr.slice(0, 200) + "...[truncated]";
+      result[k] = safeStr;
     } else {
       result[k] = v;
     }

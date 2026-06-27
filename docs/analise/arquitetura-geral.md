@@ -1,6 +1,8 @@
 # Arquitetura Geral do Turbo-Agent
 
-## Componentes Principais
+> Atualizado em: 26/06/2026 — Reflete o código-fonte atual. Divergências com versões anteriores estão marcadas com ⚠️.
+
+## Componentes Principais (Estado Atual)
 
 ### 1. `src/index.ts` — Entrypoint do CLI
 - Inicia o cliente LLM via `.env`.
@@ -13,23 +15,27 @@
 - Integra Telegram como canal paralelo.
 - Registra agentes customizados dinamicamente.
 
-### 3. `src/agent.ts` — Núcleo Orquestrador (LangGraph)
-- Monta o grafo com 5 nós: `explorerNode`, `architectNode`, `coderNode`, `qaNode`, `toolNode`.
-- Usa SQLite (`SqliteSaver`) para checkpoint/persistência.
-- Injeta system prompt e gerencia memória.
-- Faz streaming de tokens, tratamento de pausa (HITL) e circuit breaker.
-- Implementa `/rewind` para retrocesso de estado.
+### 3. `src/agent.ts` — Orquestrador (ciclo de vida) + `src/graph/` — Grafo LangGraph ⚠️ REFATORADO
+- **Os nós do grafo foram extraídos** para `src/graph/nodes/` (explorerNode, architectNode, coderNode, qaNode, toolNode + buildValidator).
+- `src/agent.ts` agora é responsável apenas por: ciclo de vida, `runStep()`, `rewindState()`, `abortPlan()`, `cancel()`, streaming de eventos e mapeamento de histórico legado.
+- O grafo é criado via `createAgentGraph()` em `src/graph/builder.ts`.
+- `AgentState` e `normalizeMessages()` estão em `src/graph/state.ts`.
+- Usa `SqliteSaver` para checkpoint persistente em `.langgraph_memory.db`.
+- Circuit breaker após 3 erros consecutivos. Suporte a slash commands: `/goal`, `/grill-me`.
 
-### 4. `src/tools.ts` — Registry de Ferramentas
-- Centraliza todas as ferramentas: `read_file`, `write_file`, `replace_in_file`, `patch_file`, `run_command`, etc.
-- Converte schemas Zod para formato OpenAI/MCP.
-- Gerencia processos em background (`start_background_command`, `read_process_logs`, `stop_background_process`).
-- Inclui `web_search`, `fetch_url`, ferramentas de browser e análise de código.
+### 4. `src/tools.ts` — Registry de Ferramentas (1086 linhas)
+- 35+ ferramentas registradas via Zod: arquivo, execução, internet, browser, sub-agentes, GitOps, sistema.
+- Converte schemas Zod para formato OpenAI.
+- `run_command` executa dentro de **Docker sandbox** via `AgentTerminal` (node-pty).
+- Ferramentas de arquivo (`read_file`, `write_file`, etc.) rodam no **host** com acesso irrestrito.
+- Inclui: `semantic_search` (RAG), `create_pull_request` (GitOps), `preview_file_changes`, `clipboard_manager`, `system_stats`, `add_core_rule`, `invoke_browser_subagent`.
 
-### 5. `src/llmClient.ts` — Cliente LLM
-- Inicializa o cliente OpenAI.
-- Prioriza `OPENAI_API_KEY`, senão usa `LLM_BASE_URL` ou um IP fixo (`172.24.160.1:18080/v1`).
-- Fallback de chave "llama.cpp" indica integração com modelos locais.
+### 5. `src/llmClient.ts` — Cliente LLM ⚠️ ATUALIZADO
+- Inicializa o cliente OpenAI com `initLLM()`.
+- Prioriza `OPENAI_API_KEY` (usa API oficial sem baseURL).
+- Fallback: `LLM_BASE_URL` do env → `undefined` (sem IP hardcoded na produção).
+- O IP fixo `http://127.0.0.1:18080/v1` existe apenas nos **arquivos de teste** (`tests-scratch/`).
+- Chave: `OPENAI_API_KEY` → `LLM_API_KEY` → `OPENROUTER_API_KEY` → `"llama.cpp"` (fallback para modelos locais).
 
 ### 6. `src/config.ts` — Configuração Global
 - Carrega `.agentrc` com defaults.
@@ -64,17 +70,29 @@
 9. **Auditoria**: Tudo é logado via `audit.ts`.
 10. **Resposta**: Retorna ao usuário via SSE ou stdout.
 
-## Pontos Críticos de Risco
+## Pontos Críticos de Risco (Estado Atual)
 
-- **Concentração em `src/agent.ts`**: todo o grafo, prompts, streaming e controle está no mesmo arquivo.
-- **Defaults agressivos**: `maxIterations=256`, IP fixo de LLM local.
-- **Mistura de responsabilidades**: CLI + server + MCP + Telegram estão fortemente acoplados.
-- **Superfície de ataque**: Escrita livre no filesystem + execução de shell sem escopo restrito.
+- **`src/tools.ts` com 1086 linhas** — ainda o maior ponto de acoplamento restante.
+- **Config de LLM duplicada** — cada nó (`explorerNode`, `architectNode`, `coderNode`, `qaNode`) instancia seu próprio `ChatOpenAI` com as mesmas variáveis de ambiente. Risco de divergência silenciosa.
+- **Acesso irrestrito ao host** — ferramentas de arquivo rodam no host sem sandboxing. Apenas `run_command` usa Docker.
+- **`UI_MODE=true` auto-aprova** ferramentas perigosas silenciosamente no modo web.
+- **Logs de debug** (`console.log`) espalhados nos nós em produção.
+- **`/goal` eleva `maxIterations` para 100** sem aviso explícito ao usuário.
 
-## Diretrizes para Refatoração
+## O que já foi resolvido (refatorações concluídas)
 
-1. Separar os nós do grafo em arquivos próprios (`src/graph/nodes/`).
-2. Isolar o cliente LLM em uma fábrica com configs claramente declaradas.
-3. Modularizar o server (`src/server/routes/`, `src/server/telegram.ts`).
-4. Simplificar `/rewind` e `/goal` para usar mecânica de snapshot mais explícita.
-5. Revisar a lógica de permissão para auditoria mais granular.
+1. ✅ Nós do grafo extraídos para `src/graph/nodes/` — `agent.ts` ficou enxuto.
+2. ✅ Servidor modularizado em `src/server/routes/` com routers independentes.
+3. ✅ IP hardcoded `172.24.160.1:18080/v1` removido de produção — apenas em testes.
+4. ✅ `maxIterations` padrão corrigido de 256 para **32**.
+5. ✅ Auditoria migrada de `.jsonl` para **SQLite com modo WAL**.
+6. ✅ Terminal migrado de `exec` para **node-pty + Docker sandbox**.
+7. ✅ Sistema de permissões com **cache granular** (por ferramenta, arquivo ou diretório).
+
+## Próximas prioridades
+
+1. Extrair configuração de LLM para um helper compartilhado em `src/graph/llmFactory.ts`.
+2. Dividir `src/tools.ts` em módulos por domínio (file, shell, web, browser, memory, git).
+3. Remover `console.log` de debug dos nós — usar `Logger.debug`.
+4. Clarificar explicitamente no system prompt a distinção host vs. sandbox para o LLM.
+5. Avaliar se `UI_MODE=true` deve continuar auto-aprovando ou passar pelo HITL da UI.

@@ -1,60 +1,61 @@
-# Análise de `src/agent.ts`
+# Analise de 
 
-## O que ele faz
-Ele é o núcleo do projeto. Centraliza:
-- estado do agente via **LangGraph**
-- memória/histórico
-- seleção de LLM
-- execução de ferramentas
-- segurança/autorização
-- auditoria
-- fluxo de exploração → arquitetura → execução → QA
+> Atualizado em: 26/06/2026 -- Reflete o codigo-fonte atual (319 linhas).
 
-## Responsabilidades dentro do arquivo
-1. **Normalização de mensagens**
-   - `normalizeMessages()` junta mensagens consecutivas e corrige chunks “chat” para `AIMessage`.
-   - Isso é uma camada de compatibilidade, mas já é um sinal de complexidade acumulada.
+## O que ele faz (estado atual)
 
-2. **Estado do grafo**
-   - `AgentState` guarda `messages`, `consecutiveErrors`, `finalAnswer`, `context`, `sender`.
+Apos a refatoracao,  e o **controlador de ciclo de vida** do agente. Responsabilidades atuais:
 
-3. **Inicialização do agente**
-   - Carrega histórico, configura checkpointer SQLite, define thread ID e monta o grafo.
+- Criar e inicializar a instancia do agente (HistoryManager, SqliteSaver, threadId, grafo)
+- Expor o metodo principal  com streaming de eventos
+- Controlar , , 
+- Fazer mapeamento entre historico legado (JSON) e mensagens do LangGraph
+- Emitir eventos via  (EventEmitter global usado pelo SSE e Telegram)
 
-4. **Fluxo principal do grafo**
-   - `explorerNode`: busca contexto, usa memória vetorial e tenta extrair tool calls.
-   - `architectNode`: transforma contexto em plano.
-   - `coderNode`: executa o plano e chama ferramentas.
-   - `qaNode`: valida o resultado.
-   - `toolNode`: executa ferramentas e faz “self-healing”.
+## O que foi extraido (refatoracao concluida)
 
-5. **Controle operacional**
-   - `cancel()`, `abortPlan()`, `rewindState()`, `runStep()`.
+| O que era em agent.ts | Onde esta agora |
+|---|---|
+| Os 5 nos do grafo | src/graph/nodes/ |
+| buildGraph() | src/graph/builder.ts |
+| AgentState | src/graph/state.ts |
+| normalizeMessages() | src/graph/state.ts |
+| buildSelfHealMessage(), truncateResult() | src/graph/utils.ts |
+| validateBuildAfterWrite() (tsc) | src/graph/nodes/buildValidator.ts |
 
-## Onde a complexidade está concentrada
-- O arquivo mistura:
-  - orquestração de workflow
-  - política de segurança
-  - prompt engineering
-  - recuperação de erro
-  - execução de ferramentas
-  - integração com memória
-  - validação final
+## Responsabilidades restantes em agent.ts
 
-## Sinais de risco
-- Muitas responsabilidades em um único arquivo.
-- Há duplicação de configurações de LLM em vários nós.
-- O prompt do `coderNode` tem instruções muito agressivas e sobrecarregadas.
-- Existem logs de debug espalhados.
-- O grafo parece evoluir por camadas, então pode ter legado e branches mortos.
-- O `toolNode` inclui checagem de TypeScript pós-escrita, o que mistura execução com validação do build.
+### 1. Constructor e inicializacao (linhas 24-41)
+- Le config via getConfig()
+- Cria HistoryManager com maxMessages
+- Inicializa SqliteSaver.fromConnString(.langgraph_memory.db)
+- Gera threadId = session_<Date.now()>
+- Compila grafo via createAgentGraph(isSubagent, checkpointer)
 
-## Minha leitura prática
-Se eu fosse priorizar simplificação, eu começaria por:
-1. separar configuração compartilhada do LLM;
-2. extrair os nós do grafo para módulos próprios;
-3. isolar segurança/auditoria do fluxo de execução;
-4. reduzir o tamanho do `toolNode`;
-5. revisar o contrato de mensagens e eventos.
+### 2. Mapeamento de mensagens (linhas 59-88)
+- mapToLangChainMessages() -- converte historico JSON para HumanMessage/AIMessage
+- mapFromLangChainMessages() -- converte de volta, limpando <think>, JSON bruto de tool calls
 
-Se quiser, eu posso continuar e fazer um **mapa linha-a-linha das responsabilidades do `src/agent.ts`** ou seguir para **`src/tools.ts`**, que provavelmente é o outro ponto de maior acoplamento.
+### 3. Controle de plano (linhas 90-125)
+- abortPlan() -- injeta mensagem de cancelamento e retoma com runStep(null)
+- rewindState(steps) -- itera getStateHistory(), cria nova thread e aplica snapshot
+
+### 4. runStep() -- execucao principal (linhas 127-318)
+- Intercepta slash commands: /goal (maxIterations -> 100) e /grill-me
+- Detecta se e a primeira execucao da thread (isFirstRun)
+- Injeta HumanMessage no estado e chama graph.streamEvents()
+- Streaming: on_chat_model_stream (tokens), on_tool_start, on_tool_end, on_chain_end
+- Detecta pausa (HITL) via finalSnapshot.next
+- Fallback: se nenhum token foi streamado, pega ultima mensagem do estado diretamente
+- Salva historico legado em JSON ao final e emite agentEvents.emit(end)
+
+## Sinais de risco remanescentes
+
+- [DEBUG STREAM END] msg: -- log de debug exposto em producao (linha 208)
+- abortPlan() internamente chama runStep(null) -- comportamento acoplado e pouco obvio
+- Historico legado (JSON) e checkpoint LangGraph (SQLite) coexistem -- duas fontes de verdade
+- Fallback de token pode mascarar problemas de streaming do proxy LLM
+
+## Resumo em uma frase
+
+ foi corretamente enxugado para controlar apenas o ciclo de vida; os riscos agora sao os logs de debug em producao e a coexistencia de dois sistemas de persistencia (JSON + SQLite).
