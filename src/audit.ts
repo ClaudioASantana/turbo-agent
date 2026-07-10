@@ -16,7 +16,9 @@ export type AuditEventType =
   | "agent_end"
   | "error"
   | "input_guardrail_blocked"
-  | "input_guardrail_warning";
+  | "input_guardrail_warning"
+  | "context_compression"
+  | "memory_stored";
 
 export interface AuditEvent {
   timestamp: string;

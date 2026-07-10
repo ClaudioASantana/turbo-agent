@@ -11,6 +11,8 @@ import { Logger } from "./logger";
 import { logAuditEvent } from "./audit";
 import { checkInputGuardrails, formatGuardrailWarnings } from "./inputGuardrails";
 import { createTracer, removeTracer, getTracer } from "./tracer";
+import { ContextCompressor } from "./contextCompressor";
+import { getMemoryManager } from "./memoryMetadata";
 
 export const agentEvents = new (require("events").EventEmitter)();
 
@@ -182,6 +184,40 @@ export class Agent {
           timestamp: new Date().toISOString()
         });
       }
+    }
+
+    // Context Compression - Compress history if approaching token limit
+    try {
+      const compressor = new ContextCompressor(this.historyManager);
+      const compressionReport = compressor.shouldCompress();
+
+      if (compressionReport.triggered) {
+        const reasonLabel = compressionReport.reason === "critical"
+          ? "🚨 CRÍTICO (90%)"
+          : "⚠️  WARNING (50%)";
+
+        if (!this.isSubagent && !isJson) {
+          process.stdout.write(pc.yellow(`\n${reasonLabel} Comprimindo contexto... (${compressionReport.currentTokens} tokens)\n`));
+          this.agentEvents.emit("system", `\n${reasonLabel} Comprimindo contexto... (${compressionReport.currentTokens} tokens)\n`);
+        }
+
+        await compressor.compressContext();
+        const statusReport = compressor.getStatusReport();
+        Logger.info(`Context compressed: ${statusReport}`);
+
+        if (!this.isSubagent && !isJson) {
+          process.stdout.write(pc.green(`✅ Compressão concluída!\n`));
+          this.agentEvents.emit("system", `✅ Compressão concluída!\n`);
+        }
+
+        await logAuditEvent({
+          type: "context_compression",
+          details: statusReport,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (e: any) {
+      Logger.warn(`Context compression failed: ${e.message}`);
     }
 
     // Slash Commands Interception
@@ -388,6 +424,57 @@ export class Agent {
            if (lastMsg._getType() === "ai" || lastMsg.name === "explorer" || lastMsg.name === "coder") {
                finalMsg = typeof lastMsg.content === 'string' ? lastMsg.content : (Array.isArray(lastMsg.content) ? lastMsg.content.map((c:any) => c.text || '').join('') : JSON.stringify(lastMsg.content));
            }
+       }
+
+       // Memory Metadata - Store episodic memory with rich metadata
+       if (!this.isSubagent && userPrompt) {
+         try {
+           const memory = getMemoryManager();
+           const spans = tracer.getSpans();
+           const endTime = Date.now();
+           const startTime = spans.length > 0 ? spans[0].startTime : endTime;
+           const duration = endTime - startTime;
+
+           const toolsUsed = spans
+             .filter(s => s.tool)
+             .map(s => s.tool!)
+             .filter((v, i, a) => a.indexOf(v) === i); // unique
+
+           const nodePath = spans
+             .filter(s => !s.tool && s.node)
+             .map(s => s.node)
+             .filter((v, i, a) => a.indexOf(v) === i); // unique
+
+           const success = result.consecutiveErrors < 3 && !result.finalAnswer?.startsWith("Error:");
+
+           memory.addMemory(
+             `[${nodePath.join('→')}] ${userPrompt.slice(0, 100)}${userPrompt.length > 100 ? '...' : ''}`,
+             {
+               toolsUsed,
+               filesModified: [], // Could be extracted from tool results if needed
+               nodePath,
+               success,
+               duration,
+               tokensUsed: {
+                 input: totalPromptTokens,
+                 output: totalCompletionTokens,
+               },
+               userGoal: userPrompt,
+               outcome: finalMsg || "",
+               tags: [], // Could be inferred from userPrompt keywords
+             }
+           );
+
+           Logger.debug(`Memory stored: ${nodePath.join('→')} (${duration}ms, ${toolsUsed.length} tools)`);
+
+           logAuditEvent({
+             type: "memory_stored",
+             details: `Stored episode: ${nodePath.join('→')}`,
+             timestamp: new Date().toISOString()
+           });
+         } catch (e: any) {
+           Logger.warn(`Failed to store memory: ${e.message}`);
+         }
        }
 
        return finalMsg || "Execução concluída sem resposta final definida.";
