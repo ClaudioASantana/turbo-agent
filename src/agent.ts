@@ -10,6 +10,7 @@ import { getConfig } from "./config";
 import { Logger } from "./logger";
 import { logAuditEvent } from "./audit";
 import { checkInputGuardrails, formatGuardrailWarnings } from "./inputGuardrails";
+import { createTracer, removeTracer, getTracer } from "./tracer";
 
 export const agentEvents = new (require("events").EventEmitter)();
 
@@ -209,11 +210,13 @@ export class Agent {
     } : null;
 
     this.abortController = new AbortController();
+    const tracer = createTracer(this.threadId);
+    let currentNodeSpanId: string | undefined;
 
     try {
        // Executa o grafo com persistência nativa (thread_id)
-       const events = this.graph.streamEvents(currentState, { 
-         version: "v2", 
+       const events = this.graph.streamEvents(currentState, {
+         version: "v2",
          recursionLimit: this.maxIterations,
          configurable: { thread_id: this.threadId },
          signal: this.abortController.signal
@@ -222,15 +225,23 @@ export class Agent {
        let printedAgentHeader: string | boolean = false;
        const streamedTokensCount: Record<string, number> = {};
        let emittedAnyToken = false;
-       
+
        let totalPromptTokens = 0;
        let totalCompletionTokens = 0;
 
        for await (const event of events) {
+         // Trace: Node execution started
+         if (event.event === "on_chain_start" && event.name !== "LangGraph") {
+           const nodeName = event.metadata?.langgraph_node || event.name;
+           currentNodeSpanId = tracer.startSpan(nodeName, undefined, {
+             input: event.data?.input ? JSON.stringify(event.data.input).slice(0, 200) : undefined,
+           });
+         }
+
          if (event.event === "on_chat_model_stream") {
             const chunk = event.data.chunk;
             const nodeName = chunk.name || "agent"; // architect, coder ou qa
-            
+
             // Apenas imprime conteúdo textual, ignora tool_calls no terminal para não poluir
             if (!this.isSubagent && !isJson && printedAgentHeader !== nodeName) {
                const displayName = nodeName === "architect" ? "📐 Arquiteto" : (nodeName === "explorer" ? "🔎 Explorador" : "🤖 Coder");
@@ -251,14 +262,24 @@ export class Agent {
             }
          } else if (event.event === "on_chat_model_end") {
             const msg = event.data.output;
-            console.log("[DEBUG STREAM END] msg:", JSON.stringify(msg));
-            
-            // Token tracking
+
+            // Token tracking and tracing
             if (msg) {
                 const usage = msg.usage_metadata || (msg.response_metadata && msg.response_metadata.tokenUsage) || (msg.response_metadata && msg.response_metadata.estimatedTokenUsage);
                 if (usage) {
                     totalPromptTokens += usage.input_tokens || usage.promptTokens || 0;
                     totalCompletionTokens += usage.output_tokens || usage.completionTokens || 0;
+
+                    // Update trace span with token info
+                    if (currentNodeSpanId) {
+                      tracer.endSpan(currentNodeSpanId, {
+                        tokens: {
+                          input: usage.input_tokens || usage.promptTokens || 0,
+                          output: usage.output_tokens || usage.completionTokens || 0,
+                        },
+                      });
+                      currentNodeSpanId = undefined;
+                    }
                 }
             }
 
@@ -285,10 +306,20 @@ export class Agent {
                process.stdout.write(pc.yellow(`\n[🔄 Executando ferramenta: ${toolName}...]\n`));
                agentEvents.emit("tool_start", toolName);
             }
+            // Start tool span
+            const toolSpanId = tracer.startSpan("tool", event.name, {
+              input: event.data?.input ? JSON.stringify(event.data.input).slice(0, 200) : undefined,
+            });
+            (event as any).__tracerSpanId = toolSpanId;
+
          } else if (event.event === "on_tool_end") {
             if (!this.isSubagent && !isJson) {
                process.stdout.write(pc.green(`[✅ Ferramenta concluída]\n`));
                agentEvents.emit("tool_end");
+            }
+            // End tool span (if there's an associated span from on_tool_start)
+            if ((event as any).__tracerSpanId) {
+              tracer.endSpan((event as any).__tracerSpanId);
             }
          } else if (event.event === "on_chain_end" && event.name === "LangGraph") {
             currentState = event.data.output;
@@ -319,6 +350,15 @@ export class Agent {
        
        agentEvents.emit("end");
        const result = currentState;
+
+       // Flush trace metrics and generate report
+       await tracer.flush();
+       const traceReport = tracer.generateReport();
+       if (!this.isSubagent && !isJson) {
+         process.stdout.write(pc.dim(traceReport));
+         agentEvents.emit("trace_report", traceReport);
+       }
+
        await DatadogDispatcher.flush();
 
        if (!this.isSubagent && !isJson && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
@@ -355,11 +395,20 @@ export class Agent {
     } catch (e: any) {
        if (e.name === "AbortError" || (e.message && e.message.includes("Cancelled by user"))) {
            Logger.warn("Execução cancelada pelo usuário.");
+           await tracer.flush();
+           removeTracer(this.threadId);
            return "Operação cancelada.";
        }
        Logger.error(`Erro crítico no LangGraph: ${e.message}`);
        agentEvents.emit("error", `Erro crítico na API do LLM: ${e.message}`);
+       await tracer.flush();
+       removeTracer(this.threadId);
        return `Error: ${e.message}`;
+    } finally {
+       // Cleanup tracer if still in memory
+       if (getTracer(this.threadId)) {
+         removeTracer(this.threadId);
+       }
     }
   }
 }
