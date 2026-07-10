@@ -9,6 +9,7 @@ import pc from "picocolors";
 import { getConfig } from "./config";
 import { Logger } from "./logger";
 import { logAuditEvent } from "./audit";
+import { checkInputGuardrails, formatGuardrailWarnings } from "./inputGuardrails";
 
 export const agentEvents = new (require("events").EventEmitter)();
 
@@ -152,7 +153,36 @@ export class Agent {
     if (isFirstRun && userPrompt) {
        initialMessages = this.mapToLangChainMessages(this.historyManager.messages);
     }
-    
+
+    // Input Guardrails - Validate before processing
+    if (userPrompt) {
+      const guardrailResult = checkInputGuardrails(userPrompt);
+
+      if (guardrailResult.blocked) {
+        const errorMsg = guardrailResult.reason || "Entrada rejeitada por guardrails de segurança.";
+        Logger.warn(`Input Guardrail Blocked: ${errorMsg}`);
+        this.agentEvents.emit("error", errorMsg);
+        await logAuditEvent({
+          type: "input_guardrail_blocked",
+          details: guardrailResult.reason,
+          timestamp: new Date().toISOString()
+        });
+        return errorMsg;
+      }
+
+      if (guardrailResult.warnings && guardrailResult.warnings.length > 0) {
+        const warningMsg = formatGuardrailWarnings(guardrailResult);
+        Logger.info(`Input Guardrail Warning: ${guardrailResult.reason}`);
+        this.agentEvents.emit("system", warningMsg);
+        await logAuditEvent({
+          type: "input_guardrail_warning",
+          details: guardrailResult.warnings.join("; "),
+          score: guardrailResult.score,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
     // Slash Commands Interception
     if (userPrompt) {
         if (userPrompt.trim().startsWith("/goal ")) {

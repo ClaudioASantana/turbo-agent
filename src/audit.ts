@@ -14,7 +14,9 @@ export type AuditEventType =
   | "permission_denied"
   | "agent_start"
   | "agent_end"
-  | "error";
+  | "error"
+  | "input_guardrail_blocked"
+  | "input_guardrail_warning";
 
 export interface AuditEvent {
   timestamp: string;
@@ -24,6 +26,9 @@ export interface AuditEvent {
   result?: string;
   message?: string;
   user?: string;
+  details?: string;
+  score?: number;
+  [key: string]: unknown;
 }
 
 let db: sqlite3.Database | null = null;
