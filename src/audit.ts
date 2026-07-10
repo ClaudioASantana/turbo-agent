@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig } from "./config";
 import sqlite3 from "sqlite3";
+import { redactSecretsInText } from "./secretsDetector";
+import { Logger } from "./logger";
 
 export type AuditEventType =
   | "tool_call"
@@ -12,7 +14,11 @@ export type AuditEventType =
   | "permission_denied"
   | "agent_start"
   | "agent_end"
-  | "error";
+  | "error"
+  | "input_guardrail_blocked"
+  | "input_guardrail_warning"
+  | "context_compression"
+  | "memory_stored";
 
 export interface AuditEvent {
   timestamp: string;
@@ -22,6 +28,9 @@ export interface AuditEvent {
   result?: string;
   message?: string;
   user?: string;
+  details?: string;
+  score?: number;
+  [key: string]: unknown;
 }
 
 let db: sqlite3.Database | null = null;
@@ -40,6 +49,7 @@ function initDb() {
     if (err) {
       console.warn(`[audit] Failed to open audit db: ${err.message}`);
     } else {
+      db!.run("PRAGMA journal_mode = WAL;");
       db!.run(`CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp TEXT,
@@ -60,17 +70,21 @@ function initDb() {
  */
 export function logAuditEvent(event: AuditEvent): void {
   if (!isEnabled()) return;
-  const database = initDb();
-  if (!database) return;
-
+  
   const timestamp = event.timestamp ?? new Date().toISOString();
   const argsStr = event.args ? JSON.stringify(event.args) : null;
   
+  // Imprime no stdout para plataformas Cloud-native coletarem
+  Logger.info(`[AUDIT] ${event.type} | Tool: ${event.tool || "N/A"}`, { ...event, args: argsStr });
+
+  const database = initDb();
+  if (!database) return;
+
   database.run(
     `INSERT INTO audit_logs (timestamp, type, tool, args, result, message, user) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [timestamp, event.type, event.tool || null, argsStr, event.result || null, event.message || null, event.user || null],
     (err) => {
-      if (err) console.warn(`[audit] Failed to write audit log: ${err.message}`);
+      if (err) console.warn(`[audit] Failed to write audit log to sqlite: ${err.message}`);
     }
   );
 }
@@ -188,8 +202,10 @@ function sanitizeArgs(args: Record<string, unknown>): Record<string, unknown> {
   for (const [k, v] of Object.entries(args)) {
     if (sensitiveKeys.test(k)) {
       result[k] = "[REDACTED]";
-    } else if (typeof v === "string" && v.length > 200) {
-      result[k] = v.slice(0, 200) + "...[truncated]";
+    } else if (typeof v === "string") {
+      let safeStr = redactSecretsInText(v);
+      if (safeStr.length > 200) safeStr = safeStr.slice(0, 200) + "...[truncated]";
+      result[k] = safeStr;
     } else {
       result[k] = v;
     }

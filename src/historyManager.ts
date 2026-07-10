@@ -43,7 +43,9 @@ export class HistoryManager {
 
   public saveHistory() {
     try {
-      fs.writeFileSync(this.historyFile, JSON.stringify(this.messages, null, 2), "utf-8");
+      const tempFile = this.historyFile + ".tmp";
+      fs.writeFileSync(tempFile, JSON.stringify(this.messages, null, 2), "utf-8");
+      fs.renameSync(tempFile, this.historyFile);
     } catch (e: any) {
       Logger.error(`Erro ao salvar histórico: ${e.message}`);
     }

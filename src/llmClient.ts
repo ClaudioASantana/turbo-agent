@@ -9,7 +9,7 @@ export function initLLM(baseURL?: string, apiKey?: string) {
   const isEnvOpenAI = !baseURL && !process.env.LLM_BASE_URL && process.env.OPENAI_API_KEY;
 
   openai = new OpenAI({
-    baseURL: isEnvOpenAI ? undefined : (baseURL || process.env.LLM_BASE_URL || "http://172.24.160.1:18080/v1"),
+    baseURL: isEnvOpenAI ? undefined : (baseURL || process.env.LLM_BASE_URL || undefined),
     apiKey: apiKey || process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "llama.cpp",
   });
 }

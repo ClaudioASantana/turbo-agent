@@ -10,3 +10,7 @@ tests-scratch/
 output*.txt
 test_*.ts
 test_*.js
+
+# Windows NTFS Alternate Data Streams (ADS) metadata
+*:Zone.Identifier
+:Zone.Identifier
