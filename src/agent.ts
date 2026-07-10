@@ -2,7 +2,8 @@ import { buildSystemPrompt } from "./promptBuilder";
 import { HistoryManager } from "./historyManager";
 import { DatadogDispatcher } from "./datadog";
 import { createAgentGraph } from "./graph/builder";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
+import { Pool } from "pg";
 import { HumanMessage, SystemMessage, ToolMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
 import pc from "picocolors";
 import { getConfig } from "./config";
@@ -17,11 +18,12 @@ export class Agent {
   public isSubagent: boolean;
   public persona: string;
   private graph: any;
-  private checkpointer: SqliteSaver;
+  private checkpointer: PostgresSaver;
   private threadId: string;
   private abortController: AbortController | null = null;
+  public agentEvents: any;
 
-  constructor(historyFilePath: string = ".agent_history.json", maxIterations?: number, maxMessages?: number, isSubagent = false, persona = "generic") {
+  constructor(historyFilePath: string = ".agent_history.json", maxIterations?: number, maxMessages?: number, isSubagent = false, persona = "generic", threadId?: string, pool?: Pool) {
     const config = getConfig();
     this.maxIterations = maxIterations ?? config.maxIterations;
     const resolvedMaxMessages = maxMessages ?? config.maxMessages;
@@ -36,9 +38,23 @@ export class Agent {
       logAuditEvent({ type: "agent_start", timestamp: new Date().toISOString() });
     }
 
-    this.checkpointer = SqliteSaver.fromConnString(".langgraph_memory.db");
-    this.threadId = `session_${Date.now()}`;
+    this.agentEvents = new (require("events").EventEmitter)();
+    
+    // Configura PostgresSaver via Pool
+    if (!pool) {
+      pool = new Pool({ connectionString: process.env.POSTGRES_URL || "postgres://agent_user:agent_password@localhost:5432/turbo_agent" });
+    }
+    this.checkpointer = new PostgresSaver(pool);
+    // Nota: Em produção real, chamar pool.setup() em um init assíncrono seria ideal.
+    // Aqui assumimos que as tabelas já foram criadas ou serão pelo primeiro run.
+
+    this.threadId = threadId || `session_${Date.now()}`;
     this.graph = createAgentGraph(this.isSubagent, this.checkpointer);
+  }
+
+  // Permite inicializar o checkpointer async
+  public async setupDatabase() {
+    await this.checkpointer.setup();
   }
 
   // Métodos de histórico mantidos para compatibilidade
@@ -51,8 +67,8 @@ export class Agent {
           this.abortController.abort("Cancelled by user");
           this.abortController = null;
       }
-      agentEvents.emit("system", "\n🚫 Operação cancelada pelo usuário.\n");
-      agentEvents.emit("end");
+      this.agentEvents.emit("system", "\n🚫 Operação cancelada pelo usuário.\n");
+      this.agentEvents.emit("end");
   }
 
   // Helpers para converter histórico legado para LangChain Messages
@@ -142,10 +158,10 @@ export class Agent {
         if (userPrompt.trim().startsWith("/goal ")) {
             this.maxIterations = 100; // Unlock iteration limits for Goal Mode
             userPrompt = userPrompt.replace(/^\/goal\s+/, "").trim() + "\n\n[SYSTEM: VOCÊ ESTÁ NO MODO /goal. Você NÃO DEVE PARAR de trabalhar até que toda a tarefa esteja concluída. Prossiga incansavelmente passo a passo.]";
-            agentEvents.emit("system", "\n🎯 Modo /goal ATIVADO. Limites de iteração removidos.\n");
+            this.agentEvents.emit("system", "\n🎯 Modo /goal ATIVADO. Limites de iteração removidos.\n");
         } else if (userPrompt.trim().startsWith("/grill-me ")) {
             userPrompt = userPrompt.replace(/^\/grill-me\s+/, "").trim() + "\n\n[SYSTEM: VOCÊ ESTÁ NO MODO /grill-me. NÃO programe nada ainda! Faça perguntas interativas e detalhadas sobre a arquitetura, regras de negócio e requisitos do usuário para entender completamente o pedido antes de iniciar o plano. Entreviste o usuário!]";
-            agentEvents.emit("system", "\n🔥 Modo /grill-me ATIVADO. O agente fará perguntas antes de programar.\n");
+            this.agentEvents.emit("system", "\n🔥 Modo /grill-me ATIVADO. O agente fará perguntas antes de programar.\n");
         }
     }
 
@@ -189,7 +205,7 @@ export class Agent {
             if (!this.isSubagent && !isJson && printedAgentHeader !== nodeName) {
                const displayName = nodeName === "architect" ? "📐 Arquiteto" : (nodeName === "explorer" ? "🔎 Explorador" : "🤖 Coder");
                process.stdout.write(pc.green(`\n\n${displayName} Raciocinando...\n`));
-               agentEvents.emit("system", `\n\n${displayName} Raciocinando...\n`);
+               this.agentEvents.emit("system", `\n\n${displayName} Raciocinando...\n`);
                printedAgentHeader = nodeName;
             }
             if (chunk.content) {
@@ -197,7 +213,7 @@ export class Agent {
                if (text) {
                    if (!this.isSubagent) {
                        process.stdout.write(pc.cyan(text));
-                       agentEvents.emit("token", text);
+                       this.agentEvents.emit("token", text);
                    }
                    emittedAnyToken = true;
                    streamedTokensCount[event.run_id] = (streamedTokensCount[event.run_id] || 0) + 1;

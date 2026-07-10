@@ -1,5 +1,5 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { AgentState } from "./state";
 import { explorerNode } from "./nodes/explorerNode";
 import { architectNode } from "./nodes/architectNode";
@@ -38,7 +38,7 @@ const routeFromQA = (state: typeof AgentState.State) => {
   return END_PLACEHOLDER;
 };
 
-export function createAgentGraph(isSubagent: boolean, checkpointer: SqliteSaver) {
+export function createAgentGraph(isSubagent: boolean, checkpointer: PostgresSaver) {
   const toolNode = createToolNode(isSubagent);
 
   const workflow = new StateGraph(AgentState)

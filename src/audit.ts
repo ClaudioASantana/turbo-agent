@@ -3,6 +3,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import sqlite3 from "sqlite3";
 import { redactSecretsInText } from "./secretsDetector";
+import { Logger } from "./logger";
 
 export type AuditEventType =
   | "tool_call"
@@ -62,17 +63,21 @@ function initDb() {
  */
 export function logAuditEvent(event: AuditEvent): void {
   if (!isEnabled()) return;
-  const database = initDb();
-  if (!database) return;
-
+  
   const timestamp = event.timestamp ?? new Date().toISOString();
   const argsStr = event.args ? JSON.stringify(event.args) : null;
   
+  // Imprime no stdout para plataformas Cloud-native coletarem
+  Logger.info(`[AUDIT] ${event.type} | Tool: ${event.tool || "N/A"}`, { ...event, args: argsStr });
+
+  const database = initDb();
+  if (!database) return;
+
   database.run(
     `INSERT INTO audit_logs (timestamp, type, tool, args, result, message, user) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [timestamp, event.type, event.tool || null, argsStr, event.result || null, event.message || null, event.user || null],
     (err) => {
-      if (err) console.warn(`[audit] Failed to write audit log: ${err.message}`);
+      if (err) console.warn(`[audit] Failed to write audit log to sqlite: ${err.message}`);
     }
   );
 }

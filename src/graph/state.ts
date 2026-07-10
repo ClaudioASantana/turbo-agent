@@ -1,5 +1,5 @@
-import { Annotation, BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
-import { messagesStateReducer } from "@langchain/langgraph";
+import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
+import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 
 export const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -7,19 +7,19 @@ export const AgentState = Annotation.Root({
     default: () => [],
   }),
   consecutiveErrors: Annotation<number>({
-    reducer: (x, y) => y,
+    reducer: (x: any, y: any) => y,
     default: () => 0,
   }),
   finalAnswer: Annotation<string | null>({
-    reducer: (x, y) => y,
+    reducer: (x: any, y: any) => y,
     default: () => null,
   }),
   context: Annotation<string>({
-    reducer: (x, y) => y,
+    reducer: (x: any, y: any) => y,
     default: () => "",
   }),
   sender: Annotation<string>({
-    reducer: (x, y) => y,
+    reducer: (x: any, y: any) => y,
     default: () => "coderNode",
   })
 });

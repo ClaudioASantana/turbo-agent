@@ -23,7 +23,7 @@ const PORT = process.env.PORT || 3333;
 process.env.UI_MODE = "true";
 
 // Inicia o Bot do Telegram em segundo plano
-startTelegramBot(agent);
+startTelegramBot();
 
 // Registra rotas
 app.use("/api/chat", chatRouter);

@@ -25,7 +25,7 @@ Se algum teste falhar, aponte o defeito detalhadamente (copiando o erro do termi
   const tools = ToolRegistry.getSchemas();
   const chatWithTools = chat.bindTools(tools);
 
-  const cleanMessages = state.messages.filter(m => m._getType() !== "system");
+  const cleanMessages = state.messages.filter((m: any) => m._getType() !== "system");
   console.log("INVOKING QA CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages]));
   const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
   response.name = "qa";

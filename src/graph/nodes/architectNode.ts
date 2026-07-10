@@ -22,7 +22,7 @@ Contexto encontrado pelo explorador sobre o repositório: ${state.context || 'Ne
 Se a tarefa for complexa, considere usar a ferramenta list_skills para ver se há regras ou diretrizes a seguir no projeto antes de planejar.
 Crie um plano técnico passo-a-passo (Spec) para o Programador executar. NÃO use ferramentas de escrita de código. Formate explicitamente cada passo começando com "Passo 1:", "Passo 2:", etc.`);
 
-  const cleanMessages = state.messages.filter(m => m._getType() !== "system");
+  const cleanMessages = state.messages.filter((m: any) => m._getType() !== "system");
   console.log("INVOKING CHAT WITH:", JSON.stringify([sysMsg, ...cleanMessages])); const response = await chat.invoke([sysMsg, ...cleanMessages], config);
   response.name = "architect";
 

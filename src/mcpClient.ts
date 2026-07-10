@@ -36,7 +36,7 @@ export class MCPManager {
       const transport = new StdioClientTransport({
         command: config.command,
         args: config.args || [],
-        env: { ...process.env, ...(config.env || {}) }
+        env: { ...process.env, ...(config.env || {}) } as Record<string, string>
       });
 
       const client = new Client({
@@ -78,7 +78,7 @@ export class MCPManager {
 
                 // Extrair string content
                 let finalStr = "";
-                for (const c of response.content) {
+                for (const c of response.content as any[]) {
                    if (c.type === "text") finalStr += c.text + "\n";
                    else finalStr += `[Content type: ${c.type}]\n`;
                 }

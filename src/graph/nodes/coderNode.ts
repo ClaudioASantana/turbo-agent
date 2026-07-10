@@ -31,7 +31,7 @@ SE O PLANO EXIGIR ALTERAR VÁRIOS ARQUIVOS INDEPENDENTES: Você NÃO deve alter�
 Sempre que for fazer grandes refatorações você mesmo, use \`preview_file_changes\` primeiro e depois use \`request_user_approval\` para perguntar se o usuário concorda, antes de usar ferramentas destrutivas de escrita.
 Toda vez que você criar ou modificar uma função/feature, você OBRIGATORIAMENTE DEVE usar a ferramenta \`invoke_subagent\` para delegar a escrita dos testes unitários para um Sub-Agente especializado (diga a ele: 'Escreva os testes em Vitest para o arquivo X'). Não escreva os testes você mesmo!
 Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIGATORIAMENTE deve chamar a ferramenta \`create_pull_request\` para efetuar o commit do código validado e enviá-lo ao GitHub. A mensagem de commit DEVE seguir o padrão Semantic Commits (feat:, fix:, chore:, refactor:, docs:, test:, style:). Só depois chame finish_task.${toolsPrompt}`);
-    const cleanMessages = state.messages.filter(m => m._getType() !== "system");
+    const cleanMessages = state.messages.filter((m: any) => m._getType() !== "system");
 
     const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
     response.name = "coder";

@@ -6,7 +6,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-export function startTelegramBot(agent: Agent) {
+export function startTelegramBot() {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) {
         console.log("[Telegram] TELEGRAM_BOT_TOKEN not found in .env. Bot disabled.");
@@ -14,26 +14,38 @@ export function startTelegramBot(agent: Agent) {
     }
 
     const bot = new Telegraf(token);
-    let activeChatId: number | null = null;
+    const activeAgents: Map<number, Agent> = new Map();
 
-    // Listen for HITL pauses globally
-    agentEvents.on("pause", () => {
-        if (activeChatId) {
-            bot.telegram.sendMessage(
-                activeChatId, 
-                "⚠️ O Arquiteto propôs um plano. Deseja executar?",
-                Markup.inlineKeyboard([
-                    Markup.button.callback("✅ Aprovar", "approve_plan"),
-                    Markup.button.callback("❌ Abortar", "abort_plan")
-                ])
-            );
+    async function getOrCreateAgent(chatId: number): Promise<Agent> {
+        if (!activeAgents.has(chatId)) {
+            const threadId = `telegram_${chatId}`;
+            const newAgent = new Agent(`.agent_history_${chatId}.json`, undefined, undefined, false, "generic", threadId);
+            await newAgent.setupDatabase();
+            
+            newAgent.agentEvents.on("pause", () => {
+                bot.telegram.sendMessage(
+                    chatId, 
+                    "⚠️ O Arquiteto propôs um plano. Deseja executar?",
+                    Markup.inlineKeyboard([
+                        Markup.button.callback("✅ Aprovar", "approve_plan"),
+                        Markup.button.callback("❌ Abortar", "abort_plan")
+                    ])
+                );
+            });
+            activeAgents.set(chatId, newAgent);
         }
-    });
+        return activeAgents.get(chatId)!;
+    }
+
 
     bot.action("approve_plan", async (ctx) => {
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+        const agent = await getOrCreateAgent(chatId);
+
         await ctx.answerCbQuery("Plano aprovado!");
-        await ctx.editMessageText("✅ Plano aprovado. Executando na sua máquina...");
-        agentEvents.emit("system", "✅ Plano Aprovado via Telegram. Retomando Coder...");
+        await ctx.editMessageText("✅ Plano aprovado. Executando...");
+        agent.agentEvents.emit("system", "✅ Plano Aprovado via Telegram. Retomando Coder...");
         
         try {
            const response = await agent.runStep(null);
@@ -44,15 +56,21 @@ export function startTelegramBot(agent: Agent) {
     });
 
     bot.action("abort_plan", async (ctx) => {
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+        const agent = await getOrCreateAgent(chatId);
+
         await ctx.answerCbQuery("Plano abortado.");
         await ctx.editMessageText("❌ Plano abortado.");
-        agentEvents.emit("system", "❌ Plano Rejeitado via Telegram. Abortando operação...");
+        agent.agentEvents.emit("system", "❌ Plano Rejeitado via Telegram. Abortando operação...");
         await agent.abortPlan();
     });
 
     bot.on("text", async (ctx) => {
-        activeChatId = ctx.chat.id;
+        const chatId = ctx.chat.id;
         const msg = ctx.message.text;
+        const agent = await getOrCreateAgent(chatId);
+
         await ctx.reply("Raciocinando na sua máquina...");
         try {
             const finalAnswer = await agent.runStep(msg);
@@ -69,7 +87,9 @@ export function startTelegramBot(agent: Agent) {
     });
 
     bot.on("voice", async (ctx) => {
-        activeChatId = ctx.chat.id;
+        const chatId = ctx.chat.id;
+        const agent = await getOrCreateAgent(chatId);
+        
         const processingMsg = await ctx.reply("🎤 Baixando e transcrevendo áudio...");
         try {
             const fileId = ctx.message.voice.file_id;
@@ -92,10 +112,9 @@ export function startTelegramBot(agent: Agent) {
 
             const OpenAIClass = require('openai').default || require('openai');
             const whisperClient = new OpenAIClass({
-                apiKey: process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || "dummy",
+                apiKey: process.env.WHISPER_API_KEY || process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || "dummy",
             });
-            // Force baseURL to undefined so it goes to official OpenAI
-            whisperClient.baseURL = "https://api.openai.com/v1";
+            whisperClient.baseURL = process.env.WHISPER_BASE_URL || "https://api.openai.com/v1";
 
             const transcription = await whisperClient.audio.transcriptions.create({
                 file: fs.createReadStream(tempFilePath),
@@ -105,7 +124,7 @@ export function startTelegramBot(agent: Agent) {
             fs.unlinkSync(tempFilePath);
 
             await ctx.telegram.editMessageText(
-                activeChatId,
+                chatId,
                 processingMsg.message_id,
                 undefined,
                 `🗣️ Você disse: "${transcription.text}"\n\nRaciocinando...`
