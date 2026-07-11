@@ -13,6 +13,9 @@ import { checkInputGuardrails, formatGuardrailWarnings } from "./inputGuardrails
 import { createTracer, removeTracer, getTracer } from "./tracer";
 import { ContextCompressor } from "./contextCompressor";
 import { getMemoryManager } from "./memoryMetadata";
+import { hasSecrets, redactSecretsInText } from "./secretsDetector";
+import { CognitiveMemorySystem } from "./memoryOrchestrator";
+import { reflectOnFailure } from "./metaLearning";
 
 export const agentEvents = new (require("events").EventEmitter)();
 
@@ -415,6 +418,9 @@ export class Agent {
 
        if (result.consecutiveErrors >= 3) {
           console.log(pc.red("\n[Circuit Breaker] Abortando execução por falhas repetidas."));
+          if (!this.isSubagent && userPrompt) {
+              await reflectOnFailure(result.messages, userPrompt);
+          }
           return "Erro crítico: O agente falhou 3 vezes consecutivas e o Circuit Breaker foi ativado.";
        }
 
@@ -423,6 +429,14 @@ export class Agent {
            const lastMsg = result.messages[result.messages.length - 1];
            if (lastMsg._getType() === "ai" || lastMsg.name === "explorer" || lastMsg.name === "coder") {
                finalMsg = typeof lastMsg.content === 'string' ? lastMsg.content : (Array.isArray(lastMsg.content) ? lastMsg.content.map((c:any) => c.text || '').join('') : JSON.stringify(lastMsg.content));
+           }
+       }
+
+       // Output Guardrails - Redact secrets from final answer
+       if (finalMsg && typeof finalMsg === 'string') {
+           if (hasSecrets(finalMsg)) {
+               Logger.warn("[Output Guardrail] Segredos/PII detectados na resposta final. Aplicando redação antes da exibição.");
+               finalMsg = redactSecretsInText(finalMsg);
            }
        }
 
@@ -447,23 +461,20 @@ export class Agent {
 
            const success = result.consecutiveErrors < 3 && !result.finalAnswer?.startsWith("Error:");
 
-           memory.addMemory(
-             `[${nodePath.join('→')}] ${userPrompt.slice(0, 100)}${userPrompt.length > 100 ? '...' : ''}`,
-             {
-               toolsUsed,
-               filesModified: [], // Could be extracted from tool results if needed
-               nodePath,
-               success,
-               duration,
-               tokensUsed: {
-                 input: totalPromptTokens,
-                 output: totalCompletionTokens,
-               },
-               userGoal: userPrompt,
-               outcome: finalMsg || "",
-               tags: [], // Could be inferred from userPrompt keywords
-             }
-           );
+           const metadata = {
+             toolsUsed,
+             filesModified: [], // Could be extracted from tool results if needed
+             nodePath,
+             success,
+             duration,
+             tokensUsed: {
+               input: totalPromptTokens,
+               output: totalCompletionTokens,
+             },
+             tags: [success ? "sucesso" : "falha"]
+           };
+
+           CognitiveMemorySystem.consolidateEpisode(result.messages, metadata);
 
            Logger.debug(`Memory stored: ${nodePath.join('→')} (${duration}ms, ${toolsUsed.length} tools)`);
 

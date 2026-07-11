@@ -6,8 +6,15 @@ import { architectNode } from "./nodes/architectNode";
 import { coderNode } from "./nodes/coderNode";
 import { qaNode } from "./nodes/qaNode";
 import { createToolNode } from "./nodes/toolNode";
+import { routerNode } from "./nodes/routerNode";
+import { chatNode } from "./nodes/chatNode";
 
 const END_PLACEHOLDER = END;
+
+const routeFromRouter = (state: typeof AgentState.State) => {
+  if (state.context === "chat") return "chatNode";
+  return "explorerNode";
+};
 
 const routeFromExplorer = (state: typeof AgentState.State) => {
   const lastMessage = state.messages[state.messages.length - 1] as any;
@@ -42,13 +49,17 @@ export function createAgentGraph(isSubagent: boolean, checkpointer: PostgresSave
   const toolNode = createToolNode(isSubagent);
 
   const workflow = new StateGraph(AgentState)
+    .addNode("routerNode", routerNode)
+    .addNode("chatNode", chatNode)
     .addNode("explorerNode", explorerNode)
     .addNode("architectNode", architectNode)
     .addNode("coderNode", coderNode)
     .addNode("qaNode", qaNode)
     .addNode("tools", toolNode)
     
-    .addEdge(START, "explorerNode")
+    .addEdge(START, "routerNode")
+    .addConditionalEdges("routerNode", routeFromRouter)
+    .addEdge("chatNode", END)
     
     .addConditionalEdges("explorerNode", routeFromExplorer)
     .addConditionalEdges("architectNode", routeFromArchitect)

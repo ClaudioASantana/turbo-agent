@@ -28,7 +28,11 @@ export const createToolNode = (isSubagent: boolean) => {
       }
 
       if (!isSubagent) {
-        console.log(pc.yellow(`\n🔧 Executando ferramenta nativa: ${toolName}`));
+        if (["read_file", "list_files", "search_files", "semantic_search"].includes(toolName)) {
+           console.log(pc.cyan(`\n🔍 Buscando informação (${toolName})...`));
+        } else {
+           console.log(pc.yellow(`\n⚙️  Executando ferramenta: ${toolName}...`));
+        }
       }
 
       const auth = await SecurityManager.authorize(toolName, args, isSubagent);

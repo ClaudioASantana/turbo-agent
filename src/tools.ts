@@ -125,6 +125,8 @@ export interface ToolDef<T extends z.ZodTypeAny> {
   description: string;
   schema: T;
   dangerous?: boolean;
+  examples?: { input: Record<string, any>; output: string }[];
+  whenNotToUse?: string[];
   execute: (args: z.infer<T>) => Promise<any> | any;
 }
 
@@ -158,6 +160,14 @@ class Registry {
     };
 
     return Array.from(this.tools.values()).map(tool => {
+      let enhancedDescription = tool.description;
+      if (tool.whenNotToUse && tool.whenNotToUse.length > 0) {
+        enhancedDescription += `\n\nWHEN NOT TO USE:\n- ${tool.whenNotToUse.join('\n- ')}`;
+      }
+      if (tool.examples && tool.examples.length > 0) {
+        enhancedDescription += `\n\nEXAMPLES:\n${tool.examples.map(ex => `Input: ${JSON.stringify(ex.input)}\nOutput: ${ex.output}`).join('\n\n')}`;
+      }
+
       if ((tool as any)._mcpJsonSchema) {
         let mcpSchema = JSON.parse(JSON.stringify((tool as any)._mcpJsonSchema));
         if (Object.keys(mcpSchema).length === 0) {
@@ -172,7 +182,7 @@ class Registry {
           type: "function",
           function: {
             name: tool.name,
-            description: tool.description,
+            description: enhancedDescription,
             parameters: mcpSchema
           }
         };
@@ -180,12 +190,13 @@ class Registry {
       
       const oaiTool = convertToOpenAITool(tool as any);
       cleanSchemaParams(oaiTool.function.parameters);
+      oaiTool.function.description = enhancedDescription;
       
       return oaiTool;
     });
   }
 
-  async execute(name: string, args: any): Promise<ToolResult> {
+  async execute(name: string, args: any, timeoutMs: number = 60000): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
       Logger.debug(`Tool not found: ${name}`);
@@ -196,10 +207,19 @@ class Registry {
     try {
       Logger.debug(`Executing tool: ${name}`, { args });
       const parsedArgs = tool.schema.parse(args);
-      const result = await tool.execute(parsedArgs);
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Tool execution timed out after ${timeoutMs}ms. The operation was aborted.`)), timeoutMs);
+      });
+      
+      const result = await Promise.race([
+        Promise.resolve(tool.execute(parsedArgs)),
+        timeoutPromise
+      ]);
+      
       const durationMs = Date.now() - startTime;
       Logger.debug(`Tool executed successfully: ${name}`, { durationMs });
-      return { ...result, durationMs };
+      return { ...result as any, durationMs };
     } catch (e: any) {
       const durationMs = Date.now() - startTime;
       Logger.debug(`Tool execution failed: ${name}`, { error: e.message, durationMs });
@@ -238,6 +258,16 @@ ToolRegistry.register({
   name: "write_file",
   description: "DANGER: OVERWRITES ENTIRE FILE. Writes content to a file (creates it if it doesn't exist). Use this ONLY for completely new files or when you intend to erase all previous content. For minor edits, use 'patch_file' or 'multi_replace_in_file'.",
   dangerous: true,
+  whenNotToUse: [
+    "When you only want to change a few lines in an existing file.",
+    "When you want to rename or delete a file."
+  ],
+  examples: [
+    {
+      input: { filePath: "./src/new_component.tsx", content: "export const App = () => <div/>;" },
+      output: "File ./src/new_component.tsx written successfully."
+    }
+  ],
   schema: z.object({ 
     filePath: z.string().describe("Absolute or relative path to the file"),
     content: z.string().describe("The content to write")
@@ -274,6 +304,16 @@ ToolRegistry.register({
   name: "replace_in_file",
   description: "Replaces all exact occurrences of a string in a file. WARNING: searchValue must match EXACTLY (including whitespaces/newlines). If you only want to change one specific occurrence among many, use 'patch_file' instead.",
   dangerous: true,
+  whenNotToUse: [
+    "When you only want to replace ONE occurrence but there are multiple in the file.",
+    "When you need to use regex or approximate matching."
+  ],
+  examples: [
+    {
+      input: { filePath: "./package.json", searchValue: "\"version\": \"1.0.0\"", replaceValue: "\"version\": \"1.0.1\"" },
+      output: "Replaced all occurrences in ./package.json"
+    }
+  ],
   schema: z.object({
     filePath: z.string(),
     searchValue: z.string(),
@@ -309,6 +349,12 @@ ToolRegistry.register({
   name: "patch_file",
   description: "Replaces a specific range of lines in a file with new content. StartLine and EndLine are 1-indexed and INCLUSIVE. This is the BEST and SAFEST tool for targeted refactors or minor edits inside large files.",
   dangerous: true,
+  examples: [
+    {
+      input: { filePath: "./src/utils.ts", startLine: 10, endLine: 12, content: "  return a + b;\n}" },
+      output: "Patched lines 10 to 12 in ./src/utils.ts"
+    }
+  ],
   schema: z.object({
     filePath: z.string().describe("EXACT ABSOLUTE path to the file"),
     startLine: z.number().describe("The 1-indexed starting line number (inclusive)"),

@@ -7,6 +7,8 @@
 import { Logger } from "./logger";
 import { DatadogDispatcher } from "./datadog";
 import { getConfig } from "./config";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface TraceSpan {
   spanId: string;
@@ -204,7 +206,7 @@ export class StepTracer {
   }
 
   /**
-   * Flush traces to Datadog and return summary
+   * Flush traces to local file and Datadog, then return summary
    */
   async flush(): Promise<void> {
     const metrics = this.getMetrics();
@@ -219,6 +221,24 @@ export class StepTracer {
       nodes: Object.keys(metrics.nodeMetrics),
       tools: Object.keys(metrics.toolMetrics),
     });
+
+    // Save locally to .agent_traces for debug/replay
+    try {
+      const traceDir = path.resolve(process.cwd(), ".agent_traces");
+      if (!fs.existsSync(traceDir)) fs.mkdirSync(traceDir, { recursive: true });
+      const traceFile = path.join(traceDir, `${this.traceId}.jsonl`);
+      
+      const lines = [];
+      for (const span of this.spans.values()) {
+        lines.push(JSON.stringify(span));
+      }
+      if (lines.length > 0) {
+        fs.writeFileSync(traceFile, lines.join("\n"), "utf-8");
+        Logger.info(`[TRACE RECORDER] Trace saved to ${traceFile}`);
+      }
+    } catch (e: any) {
+      Logger.error(`[TRACE RECORDER] Failed to save trace: ${e.message}`);
+    }
 
     // Send detailed metrics to Datadog
     for (const span of this.spans.values()) {

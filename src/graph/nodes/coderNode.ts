@@ -1,5 +1,6 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { ChatOpenAI } from "@langchain/openai";
+import { getChatModel } from "../../llmClient";
+import pc from "picocolors";
 import { ToolRegistry } from "../../tools";
 import { extractToolCalls } from "../../parser";
 import { Logger } from "../../logger";
@@ -7,20 +8,9 @@ import { AgentState } from "../state";
 
 export const coderNode = async (state: typeof AgentState.State, config: any) => {
   try {
-    const chat = new ChatOpenAI({
-      modelName: process.env.LLM_MODEL || "qwen-35b-turboquant",
-      temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0.2,
-      maxTokens: process.env.LLM_MAX_TOKENS ? parseInt(process.env.LLM_MAX_TOKENS) : 8192,
-      apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "dummy",
-      streamUsage: false,
-      maxRetries: 0,
-      streaming: true,
-      configuration: {
-        baseURL: process.env.LLM_BASE_URL || "http://127.0.0.1:18080/v1"
-      }
-    });
-
     const tools = ToolRegistry.getSchemas();
+    const chat = getChatModel({ streaming: true }, tools);
+
     const toolsPrompt = `\nFERRAMENTAS DISPONÍVEIS:\nVocê DEVE usar as ferramentas respondendo com um JSON puro no formato: {"tool": "nome", "args": { ... } }\nSchemas:\n` + JSON.stringify(tools, null, 2);
     const chatWithTools = chat;
 
@@ -33,6 +23,7 @@ Toda vez que você criar ou modificar uma função/feature, você OBRIGATORIAMEN
 Se terminar todo o trabalho solicitado, ANTES de chamar finish_task, você OBRIGATORIAMENTE deve chamar a ferramenta \`create_pull_request\` para efetuar o commit do código validado e enviá-lo ao GitHub. A mensagem de commit DEVE seguir o padrão Semantic Commits (feat:, fix:, chore:, refactor:, docs:, test:, style:). Só depois chame finish_task.${toolsPrompt}`);
     const cleanMessages = state.messages.filter((m: any) => m._getType() !== "system");
 
+    console.log(pc.cyan(`\n🤔 Pensando... (Coder)`));
     const response = await chatWithTools.invoke([sysMsg, ...cleanMessages], config);
     response.name = "coder";
 

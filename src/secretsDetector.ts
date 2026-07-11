@@ -108,6 +108,21 @@ const SECRET_PATTERNS: SecretPattern[] = [
     description: "Twilio API Key",
     regex: /\bSK[0-9a-fA-F]{32}\b/g,
   },
+  {
+    name: "pii_cpf",
+    description: "CPF Brasileiro",
+    regex: /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g,
+  },
+  {
+    name: "pii_cnpj",
+    description: "CNPJ Brasileiro",
+    regex: /\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g,
+  },
+  {
+    name: "pii_telefone_br",
+    description: "Telefone Brasileiro",
+    regex: /\(\d{2}\)\s?\d{4,5}-\d{4}/g,
+  },
 ];
 
 /**
