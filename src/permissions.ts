@@ -357,3 +357,43 @@ export function describePermissions(): string {
 
   return lines.join("\n");
 }
+
+export const PATH_BLACKLIST = [
+  ".ssh",
+  ".aws",
+  ".git/config",
+  ".env",
+  "node_modules",
+  "/etc/",
+  "C:\\Windows",
+];
+
+export function validatePathSandbox(toolName: string, args: any, isSubagent: boolean): { allowed: boolean, reason?: string } {
+  const target = args?.filePath || args?.dirPath || args?.path || args?.file;
+  if (!target) return { allowed: true };
+
+  const absoluteTarget = path.resolve(target);
+  const workspaceRoot = path.resolve(process.cwd());
+
+  // Prevent traversing out of workspace
+  if (!absoluteTarget.startsWith(workspaceRoot)) {
+    return { allowed: false, reason: "Tentativa de acesso fora do diretório do workspace não autorizada pelo Sandbox." };
+  }
+
+  // Check blacklist
+  for (const blacklisted of PATH_BLACKLIST) {
+    if (absoluteTarget.includes(path.normalize(blacklisted)) || absoluteTarget.includes(blacklisted)) {
+      return { allowed: false, reason: `Acesso negado pelo Sandbox: O caminho contém local sensível ('${blacklisted}').` };
+    }
+  }
+
+  // Subagent strict restrictions
+  if (isSubagent) {
+    const perm = getToolPermission(toolName);
+    if (perm.level === "write" || perm.level === "execute" || perm.level === "dangerous") {
+       return { allowed: false, reason: `Sandbox de Subagente: Ferramentas de nível '${perm.level}' são estritamente proibidas.` };
+    }
+  }
+
+  return { allowed: true };
+}

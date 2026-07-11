@@ -1,6 +1,6 @@
 import pc from "picocolors";
 import { getConfig } from "./config";
-import { checkPermission } from "./permissions";
+import { checkPermission, validatePathSandbox } from "./permissions";
 import { hasSecrets, detectSecrets, formatSecretsWarning } from "./secretsDetector";
 import { auditPermissionDenied, auditSecretDetected, auditUserDecision } from "./audit";
 
@@ -27,6 +27,18 @@ export class SecurityManager {
         userMessage: `Tool '${toolName}' failed: [PERMISSION_DENIED] ${permCheck.reason}`
       };
     }
+
+    const sandboxCheck = validatePathSandbox(toolName, args, isSubagent);
+    if (!sandboxCheck.allowed) {
+      if (!isSubagent) console.log(pc.red(`\n[Bloqueado pelo Sandbox] ${sandboxCheck.reason}`));
+      auditPermissionDenied(toolName, sandboxCheck.reason || "Blocked by sandbox");
+      return {
+        approved: false,
+        reason: "SANDBOX_VIOLATION",
+        userMessage: `Tool '${toolName}' failed: [SANDBOX_VIOLATION] ${sandboxCheck.reason}`
+      };
+    }
+
 
     if (permCheck.requiresApproval) {
       if (isSubagent) {
